@@ -1,0 +1,519 @@
+"""
+mtg.py — MTG Pipeline (Interactive)
+Single command to enrich your card collection with Scryfall data.
+
+Usage:
+    python3 mtg.py
+"""
+
+import os
+import sys
+import json
+import glob
+import difflib
+import subprocess
+from datetime import datetime
+
+# ─── Auto-install dependencies ────────────────────────────────────────────────
+
+def ensure_dependencies():
+    """Check and auto-install required packages."""
+    required = {"pandas": "pandas", "openpyxl": "openpyxl"}
+    missing = []
+
+    for module_name, package_name in required.items():
+        try:
+            __import__(module_name)
+        except ImportError:
+            missing.append(package_name)
+
+    if missing:
+        print(f"\n  Installing required packages: {', '.join(missing)}...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "-q"] + missing)
+            print(f"  ✓ Installation complete.\n")
+        except Exception as e:
+            print(f"  ✗ Error installing packages: {e}")
+            sys.exit(1)
+
+ensure_dependencies()
+
+import pandas as pd
+
+DOWNLOADS = os.path.expanduser("~/Downloads")
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# ─── Columns for deckbuilding export ──────────────────────────────────────────
+
+DECKBUILDING_COLUMNS = [
+    "Name", "Count", "Foil",
+    "scryfall_name", "mana_cost", "cmc", "type_line", "oracle_text",
+    "power", "toughness", "loyalty", "colors", "color_identity",
+    "keywords", "rarity", "legalities_commander", "legalities_modern", "legalities_standard",
+]
+
+DECKBUILDING_RENAME = {
+    "scryfall_name":        "Verified Name",
+    "mana_cost":            "Mana Cost",
+    "cmc":                  "CMC",
+    "type_line":            "Type",
+    "oracle_text":          "Card Text",
+    "power":                "Power",
+    "toughness":            "Toughness",
+    "loyalty":              "Loyalty",
+    "colors":               "Colors",
+    "color_identity":       "Color Identity",
+    "keywords":             "Keywords",
+    "rarity":               "Rarity",
+    "legalities_commander": "Commander Legal",
+    "legalities_modern":    "Modern Legal",
+    "legalities_standard":  "Standard Legal",
+}
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+def divider(char="─", width=56):
+    print(char * width)
+
+def header(text):
+    divider()
+    print(f"  {text}")
+    divider()
+
+def ask(prompt, default=None):
+    suffix = f" [{default}]" if default else ""
+    try:
+        val = input(f"  {prompt}{suffix}: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print("\n\nAborted.")
+        sys.exit(0)
+    return val if val else default
+
+def ask_yn(prompt, default="y"):
+    hint = "Y/n" if default == "y" else "y/N"
+    try:
+        val = input(f"  {prompt} ({hint}): ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print("\n\nAborted.")
+        sys.exit(0)
+    if not val:
+        return default == "y"
+    return val.startswith("y")
+
+def ask_choice(prompt, options, labels=None):
+    """Show a numbered list and return the chosen index (0-based)."""
+    print(f"\n  {prompt}")
+    for i, opt in enumerate(options):
+        label = labels[i] if labels else opt
+        print(f"    [{i+1}] {label}")
+    while True:
+        try:
+            val = input("  Choice: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n\nAborted.")
+            sys.exit(0)
+        if val.isdigit() and 1 <= int(val) <= len(options):
+            return int(val) - 1
+        print(f"  Please enter a number between 1 and {len(options)}.")
+
+# ─── Step 1: Find card list ───────────────────────────────────────────────────
+
+def find_card_lists():
+    patterns = [
+        os.path.join(DOWNLOADS, "*.csv"),
+        os.path.join(DOWNLOADS, "*.xlsx"),
+    ]
+    files = []
+    for p in patterns:
+        files.extend(glob.glob(p))
+    # Sort by most recently modified
+    files.sort(key=os.path.getmtime, reverse=True)
+    return files
+
+def pick_card_list():
+    header("Step 1 — Card List")
+    files = find_card_lists()
+
+    if not files:
+        print(f"\n  No .csv or .xlsx files found in {DOWNLOADS}.")
+        path = ask("Enter full path to your card list")
+        if not path or not os.path.exists(path):
+            print("  File not found. Exiting.")
+            sys.exit(1)
+        return path
+
+    if len(files) == 1:
+        f = files[0]
+        print(f"\n  Found: {os.path.basename(f)}")
+        if ask_yn("Use this file?"):
+            return f
+        path = ask("Enter full path to your card list")
+        return path
+
+    # Multiple files — show picker
+    labels = [f"{os.path.basename(f)}  ({_mod_date(f)})" for f in files[:10]]
+    idx = ask_choice("Multiple files found in Downloads — which one?", files[:10], labels)
+    return files[idx]
+
+def _mod_date(path):
+    ts = os.path.getmtime(path)
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+
+# ─── Step 2: Load & preview spreadsheet ──────────────────────────────────────
+
+def load_spreadsheet(path):
+    if path.endswith(".csv"):
+        return pd.read_csv(path)
+    return pd.read_excel(path)
+
+def preview_and_pick_column(df):
+    header("Step 2 — Name Column")
+
+    # Auto-detect candidates
+    candidates = [c for c in df.columns if any(
+        k in c.strip().lower() for k in ["name", "card", "title"]
+    )]
+    auto = candidates[0] if candidates else df.columns[0]
+
+    # Show preview — first 5 rows, first 5 columns
+    preview_cols = list(df.columns[:5])
+    print(f"\n  Preview (first 5 rows):\n")
+    preview = df[preview_cols].head(5).fillna("")
+    # Print header row
+    col_widths = [max(len(str(c)), preview[c].astype(str).str.len().max()) for c in preview_cols]
+    col_widths = [min(w, 30) for w in col_widths]
+    header_row = "  " + "  ".join(str(c).ljust(w) for c, w in zip(preview_cols, col_widths))
+    print(header_row)
+    print("  " + "  ".join("─" * w for w in col_widths))
+    for _, row in preview.iterrows():
+        print("  " + "  ".join(str(row[c])[:w].ljust(w) for c, w in zip(preview_cols, col_widths)))
+
+    print(f"\n  Detected name column: '{auto}'")
+
+    if ask_yn("Is this correct?"):
+        return auto
+
+    # Show all columns and let user pick
+    print("\n  All columns:")
+    for i, col in enumerate(df.columns):
+        print(f"    [{i+1}] {col}")
+    while True:
+        val = ask("Enter column number or name")
+        if val and val.isdigit() and 1 <= int(val) <= len(df.columns):
+            return df.columns[int(val) - 1]
+        if val in df.columns:
+            return val
+        print("  Column not found, try again.")
+
+# ─── Step 3: Find Scryfall JSON ───────────────────────────────────────────────
+
+def find_scryfall_json():
+    header("Step 3 — Scryfall Data")
+    patterns = [
+        os.path.join(SCRIPT_DIR, "oracle-cards*.json"),
+        os.path.join(SCRIPT_DIR, "*.json"),
+    ]
+    files = []
+    for p in patterns:
+        files.extend(glob.glob(p))
+    files = list(set(files))
+    files.sort(key=os.path.getmtime, reverse=True)
+
+    if not files:
+        print(f"\n  No Scryfall JSON found in {SCRIPT_DIR}")
+        print("  Download 'Oracle Cards' from: https://scryfall.com/docs/api/bulk-data")
+        print("  Then place the .json file in this folder and run again.")
+        sys.exit(1)
+
+    if len(files) == 1:
+        f = files[0]
+        size_mb = os.path.getsize(f) / 1024 / 1024
+        print(f"\n  Found: {os.path.basename(f)} ({size_mb:.0f} MB)")
+        if ask_yn("Use this file?"):
+            return f
+
+    labels = [f"{os.path.basename(f)}  ({os.path.getsize(f)//1024//1024} MB)" for f in files]
+    idx = ask_choice("Which Scryfall JSON?", files, labels)
+    return files[idx]
+
+def load_scryfall_db(json_path):
+    print(f"\n  Loading Scryfall database...")
+    with open(json_path, "r", encoding="utf-8") as f:
+        cards = json.load(f)
+    db = {}
+    for card in cards:
+        name = card.get("name", "").strip().lower()
+        if name:
+            db[name] = card
+    print(f"  Loaded {len(db):,} unique cards.")
+    return db
+
+# ─── Step 4: Export mode ──────────────────────────────────────────────────────
+
+def pick_export_mode():
+    header("Step 4 — Export Mode")
+    idx = ask_choice(
+        "Which export type?",
+        ["deckbuilding", "full"],
+        [
+            "Deckbuilding  — clean, focused columns (CMC, type, oracle text, legalities)",
+            "Full Scryfall — all available fields (set, rarity, prices, URIs, etc.)",
+        ]
+    )
+    return ["deckbuilding", "full"][idx]
+
+# ─── Step 5: Output filename ──────────────────────────────────────────────────
+
+def pick_output_name(input_path, mode):
+    header("Step 5 — Output Filename")
+    default_stem = os.path.splitext(os.path.basename(input_path))[0]
+    date_stamp = datetime.now().strftime("%Y%m%d")
+    print(f"\n  Output will be saved to: {DOWNLOADS}")
+    print(f"  Date stamp '{date_stamp}' will be appended automatically.")
+    stem = ask("Name your output file (no extension)", default=default_stem)
+    filename = f"{stem}_{mode}_{date_stamp}.xlsx"
+    full_path = os.path.join(DOWNLOADS, filename)
+    print(f"\n  Will save as: {filename}")
+    return full_path
+
+# ─── Scryfall lookup ──────────────────────────────────────────────────────────
+
+def extract_fields(card):
+    if card is None:
+        return {
+            "scryfall_name": None, "mana_cost": None, "cmc": None,
+            "type_line": None, "oracle_text": None, "power": None,
+            "toughness": None, "loyalty": None, "colors": None,
+            "color_identity": None, "keywords": None, "rarity": None,
+            "set_name": None, "legalities_standard": None,
+            "legalities_commander": None, "legalities_modern": None,
+            "scryfall_uri": None, "error": "Not found",
+        }
+
+    if "card_faces" in card:
+        face = card["card_faces"][0]
+        oracle_text = " // ".join(f.get("oracle_text", "") for f in card["card_faces"])
+        mana_cost = " // ".join(f.get("mana_cost", "") for f in card["card_faces"] if f.get("mana_cost"))
+        type_line = " // ".join(f.get("type_line", "") for f in card["card_faces"])
+        power, toughness, loyalty = face.get("power"), face.get("toughness"), face.get("loyalty")
+    else:
+        oracle_text = card.get("oracle_text", "")
+        mana_cost = card.get("mana_cost", "")
+        type_line = card.get("type_line", "")
+        power, toughness, loyalty = card.get("power"), card.get("toughness"), card.get("loyalty")
+
+    legalities = card.get("legalities", {})
+    return {
+        "scryfall_name": card.get("name"),
+        "mana_cost": mana_cost,
+        "cmc": card.get("cmc"),
+        "type_line": type_line,
+        "oracle_text": oracle_text,
+        "power": power,
+        "toughness": toughness,
+        "loyalty": loyalty,
+        "colors": ", ".join(card.get("colors", [])),
+        "color_identity": ", ".join(card.get("color_identity", [])),
+        "keywords": ", ".join(card.get("keywords", [])),
+        "rarity": card.get("rarity"),
+        "set_name": card.get("set_name"),
+        "legalities_standard": legalities.get("standard"),
+        "legalities_commander": legalities.get("commander"),
+        "legalities_modern": legalities.get("modern"),
+        "scryfall_uri": card.get("scryfall_uri"),
+        "error": None,
+    }
+
+# ─── Run pipeline ─────────────────────────────────────────────────────────────
+
+def run_pipeline(df, name_col, db):
+    header("Running Pipeline")
+    print()
+    results = []
+    not_found_names = []
+    fuzzy_matches = []
+    blank_rows = 0
+    total = len(df)
+    db_keys = list(db.keys())
+
+    for i, card_name in enumerate(df[name_col], start=1):
+        if pd.isna(card_name) or str(card_name).strip() == "":
+            blank_rows += 1
+            results.append(extract_fields(None))
+            continue
+
+        card_name = str(card_name).strip()
+        card = db.get(card_name.lower())
+        if card is None and "//" in card_name:
+            front = card_name.split("//")[0].strip()
+            card = db.get(front.lower())
+        if card is None:
+            close = difflib.get_close_matches(card_name.lower(), db_keys, n=1, cutoff=0.85)
+            if close:
+                card = db[close[0]]
+                fuzzy_matches.append((card_name, card["name"]))
+
+        fields = extract_fields(card)
+        if fields["scryfall_name"] is None:
+            not_found_names.append(card_name)
+        bar_filled = int((i / total) * 30)
+        bar = "█" * bar_filled + "░" * (30 - bar_filled)
+        print(f"\r  [{bar}] {i}/{total}  {card_name[:30]:<30}", end="", flush=True)
+        results.append(fields)
+
+    print()
+    return results, not_found_names, blank_rows, fuzzy_matches
+
+# ─── Build output ─────────────────────────────────────────────────────────────
+
+def build_output(df, results, mode, output_path):
+    enriched = pd.concat([df.reset_index(drop=True), pd.DataFrame(results)], axis=1)
+
+    if mode == "deckbuilding":
+        # Drop not-found cards
+        out = enriched[enriched["error"].isna()].copy() if "error" in enriched.columns else enriched.copy()
+        available = [c for c in DECKBUILDING_COLUMNS if c in out.columns]
+        out = out[available].copy()
+        out.rename(columns=DECKBUILDING_RENAME, inplace=True)
+
+        # Sort by CMC then Name
+        sort_cols = [c for c in ["CMC", "Name"] if c in out.columns]
+        if sort_cols:
+            out.sort_values(sort_cols, inplace=True, ignore_index=True)
+
+        for col in ["Commander Legal", "Modern Legal", "Standard Legal"]:
+            if col in out.columns:
+                out[col] = out[col].str.capitalize()
+    else:
+        out = enriched.copy()
+
+    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+        out.to_excel(writer, index=False, sheet_name="Collection")
+        ws = writer.sheets["Collection"]
+        for col_cells in ws.columns:
+            max_len = max(
+                (len(str(cell.value)) if cell.value is not None else 0 for cell in col_cells),
+                default=0
+            )
+            ws.column_dimensions[col_cells[0].column_letter].width = min(max_len + 2, 60)
+        ws.freeze_panes = "A2"
+
+    return out
+
+# ─── Summary ──────────────────────────────────────────────────────────────────
+
+def print_summary(df, results, output_path, mode, not_found_names=None, blank_rows=0, fuzzy_matches=None):
+    header("Summary")
+
+    found = sum(1 for r in results if r.get("error") is None)
+    not_found_count = len(not_found_names) if not_found_names else 0
+    fuzzy_count = len(fuzzy_matches) if fuzzy_matches else 0
+    print(f"\n  Cards matched:   {found}")
+    if fuzzy_count:
+        print(f"  Auto-corrected:  {fuzzy_count}")
+    print(f"  Not found:       {not_found_count}")
+    if blank_rows:
+        print(f"  Blank rows:      {blank_rows}  (skipped)")
+    print(f"  Export mode:     {mode}")
+    print(f"\n  Saved to: {output_path}")
+
+    # Type breakdown (top 8)
+    type_col = None
+    for col in ["type_line", "Type"]:
+        if col in df.columns:
+            type_col = col
+            break
+
+    if type_col:
+        types = df[type_col].dropna().str.split("—").str[0].str.strip().value_counts()
+        max_count = types.iloc[0] if len(types) else 1
+        total_types = types.sum()
+        print(f"\n  Top card types:")
+        for t, count in types.head(8).items():
+            bar = "█" * round(count / max_count * 20)
+            pct = round(count / total_types * 100)
+            print(f"    {t:<30} {count:>4}  {bar:<20}  {pct:>3}%")
+
+    # Color identity breakdown (top 8)
+    ci_col = None
+    for col in ["color_identity", "Color Identity"]:
+        if col in df.columns:
+            ci_col = col
+            break
+
+    if ci_col:
+        ci = df[ci_col].fillna("Colorless").value_counts()
+        max_count = ci.iloc[0] if len(ci) else 1
+        total_ci = ci.sum()
+        print(f"\n  Color identity breakdown:")
+        for c, count in ci.head(8).items():
+            label = c if c else "Colorless"
+            bar = "█" * round(count / max_count * 20)
+            pct = round(count / total_ci * 100)
+            print(f"    {label:<30} {count:>4}  {bar:<20}  {pct:>3}%")
+
+    # Auto-corrected list
+    if fuzzy_matches:
+        print(f"\n  Auto-corrected ({len(fuzzy_matches)}):")
+        for original, matched in fuzzy_matches:
+            print(f"    ~  \"{original}\"  →  {matched}")
+
+    # Not found list
+    if not_found_names:
+        print(f"\n  Cards not found in Scryfall ({len(not_found_names)}):")
+        for name in sorted(not_found_names):
+            print(f"    ✗  {name}")
+
+    divider()
+    print()
+
+# ─── Main ─────────────────────────────────────────────────────────────────────
+
+def main():
+    print()
+    print("  ╔══════════════════════════════════════╗")
+    print("  ║         MTG Pipeline  🃏              ║")
+    print("  ║   Collection Enrichment Tool         ║")
+    print("  ╚══════════════════════════════════════╝")
+    print()
+
+    # Step 1: Card list
+    card_list_path = pick_card_list()
+    print(f"\n  Using: {card_list_path}")
+
+    # Step 2: Load & preview
+    df = load_spreadsheet(card_list_path)
+    name_col = preview_and_pick_column(df)
+    print(f"\n  Name column: '{name_col}'  ({len(df)} cards total)")
+
+    # Step 3: Scryfall JSON
+    json_path = find_scryfall_json()
+    db = load_scryfall_db(json_path)
+
+    # Step 4: Export mode
+    mode = pick_export_mode()
+
+    # Step 5: Output name
+    output_path = pick_output_name(card_list_path, mode)
+
+    # Confirm before running
+    print()
+    divider()
+    print(f"  Ready to run!")
+    print(f"  Input:  {os.path.basename(card_list_path)}  ({len(df)} cards)")
+    print(f"  Mode:   {mode}")
+    print(f"  Output: {os.path.basename(output_path)}")
+    divider()
+    print()
+    if not ask_yn("Start the pipeline?"):
+        print("  Cancelled.")
+        sys.exit(0)
+
+    # Run
+    results, not_found_names, blank_rows, fuzzy_matches = run_pipeline(df, name_col, db)
+    out_df = build_output(df, results, mode, output_path)
+    print_summary(out_df, results, output_path, mode, not_found_names=not_found_names, blank_rows=blank_rows, fuzzy_matches=fuzzy_matches)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,66 @@
+# MTG Pipeline Terminal
+
+A personal command-line toolkit for enriching and organizing a Magic: The Gathering card collection using Scryfall data.
+
+## Overview
+
+This project takes a raw card list (exported from a collection tracker) and enriches it with full Scryfall card data — oracle text, mana cost, type, legalities, and more. The output is a clean, deckbuilding-ready spreadsheet.
+
+Everything runs from a single interactive command: `python3 mtg.py`
+
+---
+
+## Quick Start
+
+```bash
+# 1. Install dependencies (one time only)
+pip install pandas openpyxl
+
+# 2. Run the pipeline
+python3 mtg.py
+```
+
+The script will walk you through everything interactively.
+
+---
+
+## Requirements
+
+- Python 3.8+
+- pandas, openpyxl
+- A Scryfall Oracle Cards bulk JSON file (see below)
+- A card list in .csv or .xlsx format
+
+### Getting the Scryfall JSON
+
+1. Go to scryfall.com/docs/api/bulk-data
+2. Download Oracle Cards
+3. Place the .json file in the same folder as mtg.py
+
+---
+
+## File Structure
+
+```
+mtg-pipeline-terminal/
+├── mtg.py                  # Main script — run this
+├── README.md               # This file
+├── CHANGELOG.md            # Version history
+├── TODO.md                 # Planned features
+├── userPreferences.md      # Personal deckbuilding profile
+└── oracle-cards-YYYYMMDD.json
+```
+
+---
+
+## What It Does
+
+When you run mtg.py, it will:
+1. Auto-detect your card list from ~/Downloads
+2. Auto-detect the Scryfall JSON from the current folder
+3. Show a preview and confirm the name column
+4. Ask which export mode you want
+5. Ask for an output filename (date added automatically)
+6. Run the pipeline with live output
+7. Show a summary with type/color breakdown
+8. Save the result to ~/Downloads
