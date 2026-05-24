@@ -403,43 +403,45 @@ def run_deck_manager():
     cursor = 0
     status = ""
 
-    while True:
-        cards = sorted(deck["cards"], key=lambda c: c["name"])
-
-        with Live(build_deck_panel(deck, cursor, status), console=console, refresh_per_second=4):
+    with Live(build_deck_panel(deck, cursor, status), console=console, refresh_per_second=4) as live:
+        while True:
+            cards = sorted(deck["cards"], key=lambda c: c["name"])
             key = getch()
+            status = ""
 
-        status = ""
+            if key == 'UP':
+                cursor = max(0, cursor - 1)
 
-        if key == 'UP':
-            cursor = max(0, cursor - 1)
+            elif key == 'DOWN':
+                cursor = min(max(len(cards) - 1, 0), cursor + 1)
 
-        elif key == 'DOWN':
-            cursor = min(max(len(cards) - 1, 0), cursor + 1)
+            elif key in ('a', 'A'):
+                live.stop()
+                console.print()
+                new_cards = import_card_list()
+                if new_cards:
+                    deck["cards"] = merge_cards(deck["cards"], new_cards)
+                    cursor = 0
+                    status = f"Added {len(new_cards)} card type(s)."
+                live.start()
 
-        elif key in ('a', 'A'):
-            console.print()
-            new_cards = import_card_list()
-            if new_cards:
-                deck["cards"] = merge_cards(deck["cards"], new_cards)
-                cursor = 0
-                status = f"Added {len(new_cards)} card type(s)."
+            elif key in ('d', 'D'):
+                if cards:
+                    removed = cards[cursor]["name"]
+                    deck["cards"] = [c for c in deck["cards"] if c["name"] != removed]
+                    cursor = min(cursor, max(len(deck["cards"]) - 1, 0))
+                    status = f"Removed '{removed}'."
 
-        elif key in ('d', 'D'):
-            if cards:
-                removed = cards[cursor]["name"]
-                deck["cards"] = [c for c in deck["cards"] if c["name"] != removed]
-                cursor = min(cursor, max(len(deck["cards"]) - 1, 0))
-                status = f"Removed '{removed}'."
+            elif key in ('s', 'S'):
+                path = save_deck(deck)
+                status = f"Saved: {os.path.basename(path)}"
+                live.update(build_deck_panel(deck, cursor, status))
+                break
 
-        elif key in ('s', 'S'):
-            path = save_deck(deck)
-            status = f"Saved: {os.path.basename(path)}"
-            console.print(build_deck_panel(deck, cursor, status))
-            break
+            elif key in ('q', 'Q', 'ESC'):
+                break
 
-        elif key in ('q', 'Q', 'ESC'):
-            break
+            live.update(build_deck_panel(deck, cursor, status))
 
 # ─── Card Lookup ──────────────────────────────────────────────────────────────
 
