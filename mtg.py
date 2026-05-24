@@ -85,6 +85,9 @@ DECKBUILDING_RENAME = {
 def term_width():
     return shutil.get_terminal_size().columns
 
+def term_height():
+    return shutil.get_terminal_size().lines
+
 def divider(char="─", width=None):
     print(char * (width or min(term_width(), 80)))
 
@@ -298,6 +301,36 @@ def build_deck_panel(deck, cursor, status=""):
         box=box.ROUNDED,
     )
 
+def render_deck_view(deck, cursor, status=""):
+    """Clear the terminal and redraw the deck editor in place."""
+    console.clear()
+    cards = sorted(deck["cards"], key=lambda c: c["name"])
+    total = sum(c["count"] for c in deck["cards"])
+
+    console.print(f"\n  [bold cyan]{deck['name']}[/bold cyan]  [dim]{total} cards[/dim]\n")
+
+    if not cards:
+        console.print("  [dim]No cards yet — press A to add[/dim]")
+    else:
+        for i, card in enumerate(cards):
+            if i == cursor:
+                console.print(
+                    f"  [bold cyan]▶  {card['count']}x  {card['name']}[/bold cyan]"
+                )
+            else:
+                console.print(f"     [dim]{card['count']}x[/dim]  {card['name']}")
+
+    console.print()
+    console.print(
+        "  [dim]↑↓[/dim] Navigate   "
+        "[bold cyan]A[/bold cyan] Add   "
+        "[bold red]D[/bold red] Delete   "
+        "[bold green]S[/bold green] Save   "
+        "[dim]Q[/dim] Quit"
+    )
+    if status:
+        console.print(f"\n  [green]✓ {status}[/green]")
+
 def print_deck(deck):
     total = sum(c["count"] for c in deck["cards"])
     header(f"Deck: {deck['name']}  ({total} cards)")
@@ -399,7 +432,7 @@ def run_deck_manager():
             total = sum(c["count"] for c in cards)
             print(f"\n  ✓ Imported {total} cards ({len(cards)} unique).")
 
-    # Deck edit loop — keyboard driven
+    # Deck edit loop — Live in-place update
     cursor = 0
     status = ""
 
