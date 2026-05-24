@@ -12,12 +12,13 @@ import json
 import glob
 import difflib
 import subprocess
+import textwrap
 from datetime import datetime
 
 # ─── Auto-install dependencies ────────────────────────────────────────────────
 
 def ensure_dependencies():
-    required = {"pandas": "pandas", "openpyxl": "openpyxl"}
+    required = {"pandas": "pandas", "openpyxl": "openpyxl", "rich": "rich"}
     missing = []
     for module_name, package_name in required.items():
         try:
@@ -35,7 +36,15 @@ def ensure_dependencies():
 
 ensure_dependencies()
 
+import shutil
 import pandas as pd
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+from rich import box
+
+console = Console()
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -70,13 +79,15 @@ DECKBUILDING_RENAME = {
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-def divider(char="─", width=56):
-    print(char * width)
+def term_width():
+    return shutil.get_terminal_size().columns
+
+def divider(char="─", width=None):
+    print(char * (width or min(term_width(), 80)))
 
 def header(text):
-    divider()
-    print(f"  {text}")
-    divider()
+    console.print(f"\n[bold cyan]{text}[/bold cyan]")
+    console.print("[dim cyan]" + "─" * min(term_width(), 80) + "[/dim cyan]")
 
 def ask(prompt, default=None):
     suffix = f" [{default}]" if default else ""
@@ -357,41 +368,89 @@ def run_deck_manager():
 # ─── Card Lookup ──────────────────────────────────────────────────────────────
 
 def print_card(card):
-    divider()
-    name = card.get("name", "Unknown")
-    mana = card.get("mana_cost", "")
-    if "card_faces" in card:
-        mana = " // ".join(f.get("mana_cost", "") for f in card["card_faces"] if f.get("mana_cost"))
-    print(f"  {name}  {mana}")
-    print(f"  {card.get('type_line', '')}")
-    divider()
+    WIDTH = min(term_width() - 2, 72)
+    INNER = WIDTH - 2
+    TEXT_W = INNER - 2
+
+    def row(content):
+        return f"│{content}│"
+
+    def text_row(text=""):
+        return row(f" {text:<{TEXT_W}} ")
+
+    def mid_divider():
+        return f"├{'─' * INNER}┤"
+
+    # Gather fields
+    name      = card.get("name", "Unknown")
+    mana      = card.get("mana_cost", "")
+    type_line = card.get("type_line", "")
+    oracle    = card.get("oracle_text", "")
 
     if "card_faces" in card:
-        for face in card["card_faces"]:
-            if face.get("oracle_text"):
-                print(f"\n  [{face.get('name', '')}]")
-                print(f"  {face['oracle_text']}")
-    elif card.get("oracle_text"):
-        print(f"\n  {card['oracle_text']}")
+        faces     = card["card_faces"]
+        mana      = " // ".join(f.get("mana_cost", "") for f in faces if f.get("mana_cost"))
+        type_line = " // ".join(f.get("type_line", "") for f in faces)
+        oracle    = "\n\n".join(f.get("oracle_text", "") for f in faces)
 
-    if card.get("power") or card.get("toughness"):
-        print(f"\n  Power / Toughness: {card.get('power', '?')}/{card.get('toughness', '?')}")
-    if card.get("loyalty"):
-        print(f"\n  Loyalty: {card['loyalty']}")
-
-    legalities = card.get("legalities", {})
-    if legalities:
-        print(f"\n  Legality:")
-        for fmt in ["commander", "modern", "standard"]:
-            status = legalities.get(fmt, "unknown").capitalize()
-            print(f"    {fmt.capitalize():<12} {status}")
-
+    power    = card.get("power")
+    toughness = card.get("toughness")
+    loyalty  = card.get("loyalty")
+    rarity   = card.get("rarity", "").capitalize()
     set_name = card.get("set_name", "")
-    rarity = card.get("rarity", "").capitalize()
-    if set_name or rarity:
-        print(f"\n  {set_name}  —  {rarity}")
 
-    divider()
+    lines = []
+
+    # Top border
+    lines.append(f"┌{'─' * INNER}┐")
+
+    # Name (left) + mana cost (right)
+    mana_part = f"{mana} " if mana else " "
+    name_w    = INNER - len(mana_part) - 1
+    lines.append(row(f" {name[:name_w]:<{name_w}}{mana_part}"))
+
+    # Image box
+    img_inner = INNER - 4  # 54 chars inside the art border
+    lines.append(mid_divider())
+    lines.append(row(f" ┌{'─' * img_inner}┐ "))
+    for _ in range(5):
+        lines.append(row(f" │{' ' * img_inner}│ "))
+    lines.append(row(f" └{'─' * img_inner}┘ "))
+
+    # Type line
+    lines.append(mid_divider())
+    lines.append(text_row(type_line))
+
+    # Oracle text
+    lines.append(mid_divider())
+    lines.append(text_row())
+    if oracle:
+        for para in oracle.split("\n"):
+            if para.strip():
+                for wrapped in textwrap.wrap(para, width=TEXT_W):
+                    lines.append(text_row(wrapped))
+            else:
+                lines.append(text_row())
+    lines.append(text_row())
+
+    # Bottom bar: rarity • set (left) and P/T or loyalty (right)
+    lines.append(mid_divider())
+    if power is not None and toughness is not None:
+        pt = f"{power}/{toughness}"
+    elif loyalty:
+        pt = f"[{loyalty}]"
+    else:
+        pt = ""
+    pt_part      = f"{pt} " if pt else " "
+    bottom_left_w = INNER - len(pt_part) - 1
+    bottom_left  = f"{rarity} • {set_name}" if set_name else rarity
+    lines.append(row(f" {bottom_left[:bottom_left_w]:<{bottom_left_w}}{pt_part}"))
+
+    # Bottom border
+    lines.append(f"└{'─' * INNER}┘")
+
+    print()
+    print("\n".join(lines))
     print()
 
 def run_card_lookup():
@@ -763,11 +822,15 @@ def run_collection_pipeline():
 
 def main():
     while True:
-        print()
-        print("  ╔══════════════════════════════════════╗")
-        print("  ║      MTG Terminal Builder  🃏         ║")
-        print("  ╚══════════════════════════════════════╝")
-        print()
+        console.print()
+        console.print(Panel(
+            "[bold yellow]MTG Terminal Builder[/bold yellow]  🃏",
+            style="bold cyan",
+            box=box.DOUBLE,
+            expand=False,
+            padding=(0, 4),
+        ))
+        console.print()
 
         idx = ask_choice(
             "What would you like to do?",
