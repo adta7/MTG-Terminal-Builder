@@ -7,6 +7,7 @@ Usage:
 """
 
 import os
+import re
 import sys
 import json
 import glob
@@ -44,7 +45,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
-from rich.live import Live
 from rich import box
 
 console = Console()
@@ -175,22 +175,134 @@ def save_deck(deck):
         json.dump({k: v for k, v in deck.items() if k != "path"}, f, indent=2)
     return path
 
-def parse_card_list(lines):
-    cards = []
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        parts = line.split(" ", 1)
-        if len(parts) == 2 and parts[0].isdigit():
-            cards.append({"name": parts[1].strip(), "count": int(parts[0])})
-        else:
-            cards.append({"name": line, "count": 1})
-    return cards
+# Matches section header lines from Moxfield, Arena, Archidekt, MTGO exports.
+# Examples: "Sideboard", "Sideboard (15)", "Commander (1)", "Deck:", "Maybeboard"
+# Does NOT match card names like "Commander Eesha" (extra non-paren text after keyword).
+_SECTION_RE = re.compile(
+    r'^(commander|deck|sideboard|maybeboard|companion|mainboard|main|'
+    r'attractions|stickers|schemes|planes)'
+    r'(\s*:|\s+\(\d+\))?$',
+    re.IGNORECASE,
+)
+_SKIP_SECTIONS = {"maybeboard", "companion", "attractions", "stickers", "schemes", "planes"}
+_MAIN_SECTIONS = {"commander", "deck", "mainboard", "main"}
 
-def import_card_list():
-    print("\n  Paste your card list below.")
-    print("  Format: '4 Lightning Bolt' (one card per line)")
+
+def _clean_card_name(raw):
+    """
+    Strip metadata from a raw card name string:
+      (set_code)        e.g. (m19), (soc), (2x2), (hob)
+      [tags]            e.g. [Protection], [Maybeboard{noDeck}{noPrice},Draw]
+      trailing number   e.g. trailing collector number like 196 in "Swamp (hob) 196"
+    Returns the cleaned card name, or None if the result is empty.
+    """
+    name = raw
+    name = re.sub(r'\s*\([a-z0-9]{2,6}\)\s*', ' ', name, flags=re.IGNORECASE)
+    name = re.sub(r'\s*\[[^\]]*\]\s*', ' ', name)
+    name = re.sub(r'\s+\d+\s*$', '', name)
+    return name.strip() or None
+
+
+def _inline_tag_section(raw_name):
+    """
+    Return the lowercase content of the first [...] tag in the name string,
+    or an empty string if no tag is present.
+    Used to detect Archidekt inline maybeboard/sideboard markers.
+    """
+    m = re.search(r'\[([^\]]+)\]', raw_name)
+    return m.group(1).lower() if m else ""
+
+
+def parse_card_list(lines):
+    """
+    Parse a card list from common export formats. Returns (main, sideboard) tuple.
+
+      4 Lightning Bolt                          plain text → main
+      4x Lightning Bolt                         Moxfield / Archidekt (x suffix) → main
+      1x Animate Dead (soc) [Recursion]         Archidekt — set code and tag stripped → main
+      1x Cabal Ritual (tor) [Sideboard,Ramp]    Archidekt inline sideboard tag → sideboard
+      1x Bolas's Citadel (war) [Maybeboard...]  Archidekt maybeboard — skipped entirely
+      26x Swamp (hob) 196                       set code + collector number stripped → main
+      SB: 4 Counterspell                        MTGO sideboard prefix → sideboard
+      # comment / // comment                    skipped
+      Sideboard (15)                            section header — cards below → sideboard
+      Maybeboard                                section header — cards below skipped
+      Commander (1) / Deck (98)                 section header — cards below → main
+    """
+    main      = []
+    sideboard = []
+    commander = None
+    current_section = "main"  # "main", "sideboard", or "skip"
+
+    for raw in lines:
+        line = raw.strip()
+
+        # Blank lines and comment lines
+        if not line or line.startswith("#") or line.startswith("//"):
+            continue
+
+        # MTGO sideboard prefix "SB: 4 Card Name" → route to sideboard
+        mtgo_sb = re.match(r'^SB:\s*(.+)', line, re.IGNORECASE)
+        if mtgo_sb:
+            name = _clean_card_name(mtgo_sb.group(1).strip())
+            if name:
+                sideboard.append({"name": name, "count": 1})
+            continue
+
+        # Section header detection (Moxfield / Arena / MTGO style)
+        m = _SECTION_RE.match(line)
+        if m:
+            key = m.group(1).lower()
+            if key == "sideboard":
+                current_section = "sideboard"
+            elif key in _SKIP_SECTIONS:
+                current_section = "skip"
+            else:
+                current_section = "main"
+            continue
+
+        if current_section == "skip":
+            continue
+
+        # Split count prefix. Handles "4", "4x", "4X".
+        parts = line.split(" ", 1)
+        count_str = parts[0].rstrip("xX")
+        if len(parts) == 2 and count_str.isdigit():
+            count    = int(count_str)
+            name_raw = parts[1].strip()
+        else:
+            count    = 1
+            name_raw = line
+
+        # Archidekt inline tag routing.
+        # [Maybeboard{noDeck}...] → skip.
+        # [Sideboard,...] → sideboard.
+        # [Commander{top}] → main deck + mark as commander.
+        tag = _inline_tag_section(name_raw)
+        if "maybeboard" in tag:
+            continue
+        is_inline_sb  = "sideboard"  in tag and "commander" not in tag
+        is_commander  = "commander"  in tag
+
+        # Strip set codes, remaining tags, and trailing collector numbers.
+        name = _clean_card_name(name_raw)
+        if not name:
+            continue
+
+        if is_inline_sb or current_section == "sideboard":
+            sideboard.append({"name": name, "count": count})
+        else:
+            main.append({"name": name, "count": count})
+            if is_commander and commander is None:
+                commander = name
+
+    return main, sideboard, commander
+
+
+def _collect_lines(prompt_extra=""):
+    """Shared input loop for card list pasting."""
+    if prompt_extra:
+        print(prompt_extra)
     print("  Type END on a new line when done.\n")
     lines = []
     while True:
@@ -202,7 +314,26 @@ def import_card_list():
         if line.upper() == "END":
             break
         lines.append(line)
-    return parse_card_list(lines)
+    return lines
+
+
+def import_card_list():
+    print("\n  Paste your card list below.")
+    print("  Supports: plain text, Moxfield, Arena, Archidekt exports.")
+    print("  Sideboard cards are captured separately. Maybeboard is skipped.")
+    lines = _collect_lines()
+    return parse_card_list(lines)  # returns (main, sideboard, commander_name)
+
+
+def import_sideboard_list():
+    """Paste a plain card list — everything goes straight to the sideboard, no tags needed."""
+    print("\n  Paste cards to add to the sideboard.")
+    print("  Plain names or counts work fine — no tags needed.")
+    lines = _collect_lines()
+    # Parse normally and merge all buckets: user may or may not use tags,
+    # but the intent is sideboard so everything lands there.
+    main, sideboard, _ = parse_card_list(lines)
+    return main + sideboard
 
 def merge_cards(existing_cards, new_cards):
     index = {c["name"].lower(): c for c in existing_cards}
@@ -219,6 +350,12 @@ def deck_to_text(deck):
     lines = []
     for card in sorted(deck["cards"], key=lambda c: c["name"]):
         lines.append(f"{card['count']} {card['name']}")
+    sideboard = deck.get("sideboard", [])
+    if sideboard:
+        lines.append("")
+        lines.append("Sideboard")
+        for card in sorted(sideboard, key=lambda c: c["name"]):
+            lines.append(f"{card['count']} {card['name']}")
     return "\n".join(lines)
 
 def copy_to_clipboard(text):
@@ -253,94 +390,312 @@ def getch():
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
-def build_deck_panel(deck, cursor, status=""):
-    """Build the interactive deck view as a Rich renderable."""
-    cards = sorted(deck["cards"], key=lambda c: c["name"])
-    total = sum(c["count"] for c in deck["cards"])
+def show_deck(deck, filter_query="", filter_db=None):
+    """Print the current deck contents, including sideboard if present.
+    If filter_query + filter_db are set, only matching cards are shown but
+    with their original index numbers so D/S# deletes still work correctly.
+    """
+    cards     = sorted(deck["cards"],             key=lambda c: c["name"])
+    sideboard = sorted(deck.get("sideboard", []), key=lambda c: c["name"])
+    total     = sum(c["count"] for c in deck["cards"])
+    sb_total  = sum(c["count"] for c in sideboard)
+    commander = deck.get("commander")
 
-    table = Table.grid(padding=(0, 1))
-    table.add_column(width=2)
-    table.add_column(width=4, justify="right")
-    table.add_column()
+    console.print(f"\n  [bold cyan]{deck['name']}[/bold cyan]  [dim]{total} cards[/dim]")
+    if commander:
+        console.print(f"  [bold yellow]⚔  {commander}[/bold yellow]")
 
-    if not cards:
-        table.add_row(" ", "", "[dim]No cards yet — press A to add[/dim]")
+    filtering = bool(filter_query and filter_db)
+
+    if filtering:
+        matched    = {c["name"] for c in apply_deck_filter(cards,     filter_query, filter_db)}
+        sb_matched = {c["name"] for c in apply_deck_filter(sideboard, filter_query, filter_db)}
+        n_matched  = sum(1 for c in cards if c["name"] in matched)
+        console.print(f"  [dim]Filter:[/dim] [yellow]{filter_query}[/yellow]"
+                      f"  [dim]— {n_matched} of {len(cards)} cards[/dim]")
+        console.print()
+
+        shown = 0
+        for i, card in enumerate(cards, 1):
+            if card["name"] in matched:
+                qty = f"{card['count']}x" if card["count"] > 1 else ""
+                console.print(f"  [dim]{i:>3}.[/dim]  {qty:<4}{card['name']}")
+                shown += 1
+        if not shown:
+            console.print("  [dim]No cards match this filter.[/dim]")
+
+        if sideboard:
+            sb_hits = [c for c in sideboard if c["name"] in sb_matched]
+            if sb_hits:
+                sb_n = sum(c["count"] for c in sb_hits)
+                console.print(f"\n  [dim]── Sideboard  {sb_n} match(es) ──[/dim]\n")
+                for i, card in enumerate(sideboard, 1):
+                    if card["name"] in sb_matched:
+                        qty = f"{card['count']}x" if card["count"] > 1 else ""
+                        console.print(f"  [dim]S{i:>2}.[/dim]  {qty:<4}{card['name']}")
     else:
-        for i, card in enumerate(cards):
-            if i == cursor:
-                table.add_row(
-                    "[bold cyan]▶[/bold cyan]",
-                    f"[bold cyan]{card['count']}x[/bold cyan]",
-                    f"[bold cyan]{card['name']}[/bold cyan]",
-                )
-            else:
-                table.add_row(" ", f"[dim]{card['count']}x[/dim]", card["name"])
+        console.print()
+        if not cards:
+            console.print("  [dim]No cards yet.[/dim]")
+        else:
+            for i, card in enumerate(cards, 1):
+                qty = f"{card['count']}x" if card["count"] > 1 else ""
+                console.print(f"  [dim]{i:>3}.[/dim]  {qty:<4}{card['name']}")
 
-    hints = Text.from_markup(
-        "\n [dim]↑↓[/dim] Navigate   "
-        "[bold cyan]A[/bold cyan] Add   "
-        "[bold red]D[/bold red] Delete   "
-        "[bold green]S[/bold green] Save   "
-        "[dim]Q[/dim] Quit"
-    )
-
-    body = Table.grid()
-    body.add_row(Text(""))
-    body.add_row(table)
-    body.add_row(hints)
-    if status:
-        body.add_row(Text.from_markup(f"\n [green]✓ {status}[/green]"))
-    else:
-        body.add_row(Text(""))
-
-    return Panel(
-        body,
-        title=f"[bold cyan]{deck['name']}[/bold cyan]",
-        subtitle=f"[dim]{total} cards[/dim]",
-        border_style="cyan",
-        box=box.ROUNDED,
-    )
-
-def render_deck_view(deck, cursor, status=""):
-    """Clear the terminal and redraw the deck editor in place."""
-    console.clear()
-    cards = sorted(deck["cards"], key=lambda c: c["name"])
-    total = sum(c["count"] for c in deck["cards"])
-
-    console.print(f"\n  [bold cyan]{deck['name']}[/bold cyan]  [dim]{total} cards[/dim]\n")
-
-    if not cards:
-        console.print("  [dim]No cards yet — press A to add[/dim]")
-    else:
-        for i, card in enumerate(cards):
-            if i == cursor:
-                console.print(
-                    f"  [bold cyan]▶  {card['count']}x  {card['name']}[/bold cyan]"
-                )
-            else:
-                console.print(f"     [dim]{card['count']}x[/dim]  {card['name']}")
+        if sideboard:
+            console.print(f"\n  [dim]── Sideboard  {sb_total} cards ──[/dim]\n")
+            for i, card in enumerate(sideboard, 1):
+                qty = f"{card['count']}x" if card["count"] > 1 else ""
+                console.print(f"  [dim]S{i:>2}.[/dim]  {qty:<4}{card['name']}")
 
     console.print()
-    console.print(
-        "  [dim]↑↓[/dim] Navigate   "
-        "[bold cyan]A[/bold cyan] Add   "
-        "[bold red]D[/bold red] Delete   "
-        "[bold green]S[/bold green] Save   "
-        "[dim]Q[/dim] Quit"
-    )
-    if status:
-        console.print(f"\n  [green]✓ {status}[/green]")
 
-def print_deck(deck):
-    total = sum(c["count"] for c in deck["cards"])
-    header(f"Deck: {deck['name']}  ({total} cards)")
-    if not deck["cards"]:
-        print("\n  No cards yet.\n")
+def validate_card_list(cards, db):
+    """Check each card against the DB. Offer fuzzy suggestions for mismatches."""
+    db_keys = list(db.keys())
+    validated = []
+
+    for card in cards:
+        name = card["name"]
+        found = db.get(name.lower())
+
+        if found is None and "//" in name:
+            found = db.get(name.split("//")[0].strip().lower())
+
+        if found:
+            validated.append({"name": found["name"], "count": card["count"]})
+            continue
+
+        close = difflib.get_close_matches(name.lower(), db_keys, n=3, cutoff=0.6)
+        if close:
+            console.print(f"\n  [yellow]?[/yellow] '{name}' not found. Did you mean:")
+            for i, c in enumerate(close, 1):
+                console.print(f"      [{i}] {db[c]['name']}")
+            val = ask("Enter number to use, or ENTER to skip").strip()
+            if val.isdigit() and 1 <= int(val) <= len(close):
+                correct = db[close[int(val) - 1]]
+                console.print(f"  [green]✓ Using: {correct['name']}[/green]")
+                validated.append({"name": correct["name"], "count": card["count"]})
+            else:
+                console.print(f"  [dim]Skipped '{name}'.[/dim]")
+        else:
+            console.print(f"  [red]✗[/red] '{name}' — not found, no close matches. Skipping.")
+
+    return validated
+
+def _check_card_list_against_db(card_list, db, db_keys, section_label):
+    """Check one list (main or sideboard) against the DB, fixing names in place."""
+    issues = []
+    for card in card_list:
+        found = db.get(card["name"].lower())
+        if found is None and "//" in card["name"]:
+            found = db.get(card["name"].split("//")[0].strip().lower())
+        if found is None:
+            issues.append(card)
+
+    if not issues:
+        console.print(f"  [green]✓ All {section_label} cards found.[/green]")
         return
-    print()
-    for card in sorted(deck["cards"], key=lambda c: c["name"]):
-        print(f"    {card['count']}x  {card['name']}")
-    print()
+
+    console.print(f"  [yellow]{len(issues)} {section_label} card(s) not recognised:[/yellow]\n")
+    for card in issues:
+        close = difflib.get_close_matches(card["name"].lower(), db_keys, n=3, cutoff=0.6)
+        if close:
+            console.print(f"  [yellow]?[/yellow] '{card['name']}'. Did you mean:")
+            for i, c in enumerate(close, 1):
+                console.print(f"      [{i}] {db[c]['name']}")
+            val = ask("Enter number to fix, or ENTER to skip").strip()
+            if val.isdigit() and 1 <= int(val) <= len(close):
+                correct_name = db[close[int(val) - 1]]["name"]
+                for c in card_list:
+                    if c["name"] == card["name"]:
+                        c["name"] = correct_name
+                        break
+                console.print(f"  [green]✓ Fixed: '{card['name']}' → '{correct_name}'[/green]")
+        else:
+            console.print(f"  [red]✗[/red] '{card['name']}' — no close matches found.")
+
+
+def check_deck_against_db(deck, db):
+    """Validate main deck and sideboard against Scryfall. Offer to fix unrecognised names."""
+    db_keys   = list(db.keys())
+    main      = sorted(deck["cards"], key=lambda c: c["name"])
+    sideboard = sorted(deck.get("sideboard", []), key=lambda c: c["name"])
+    total     = len(main) + len(sideboard)
+
+    console.print(f"\n  Checking {total} cards against Scryfall...\n")
+    _check_card_list_against_db(deck["cards"], db, db_keys, "main deck")
+    if sideboard:
+        console.print()
+        _check_card_list_against_db(deck["sideboard"], db, db_keys, "sideboard")
+    console.print()
+
+
+def apply_deck_filter(cards, query, db):
+    """
+    Filter a list of deck card entries by a query string. Returns matching entries.
+
+    Syntax:
+      lightning          name contains "lightning"
+      type:creature      type line contains "creature"
+      text:draw          oracle text contains "draw"
+      cmc:3              CMC equals 3
+      cmc:>=4            CMC greater than or equal to 4  (also >, <, <=, !=)
+      color:b            color identity includes Black  (w/u/b/r/g or full name)
+      color:colorless    no color identity
+      color:multicolor   two or more colors
+      keyword:flying     keywords list contains "flying"
+    """
+    if not query:
+        return cards
+
+    COLOR_MAP = {
+        "white": "W", "blue": "U", "black": "B", "red": "R", "green": "G",
+        "w": "W", "u": "U", "b": "B", "r": "R", "g": "G",
+    }
+
+    field_m = re.match(r'^(type|text|cmc|color|keyword|name):(.+)$', query.strip(), re.IGNORECASE)
+    field   = field_m.group(1).lower() if field_m else None
+    value   = field_m.group(2).strip().lower() if field_m else query.strip().lower()
+
+    results = []
+    for entry in cards:
+        name = entry["name"]
+        card = db.get(name.lower())
+        if card is None and "//" in name:
+            card = db.get(name.split("//")[0].strip().lower())
+
+        match = False
+
+        # Default (no prefix) or explicit name: search card name
+        if field is None or field == "name":
+            match = value in name.lower()
+
+        elif field == "type":
+            tl = (card.get("type_line", "") if card else "").lower()
+            match = value in tl
+
+        elif field == "text":
+            oracle = (card.get("oracle_text", "") if card else "").lower()
+            match = value in oracle
+
+        elif field == "cmc":
+            cmc = float(card.get("cmc", 0) or 0) if card else 0
+            m2  = re.match(r'^([><=!]{0,2})(\d+(?:\.\d+)?)$', value)
+            if m2:
+                op, num = (m2.group(1) or "="), float(m2.group(2))
+                if   op in ("", "=", "=="): match = cmc == num
+                elif op == ">":             match = cmc >  num
+                elif op == ">=":            match = cmc >= num
+                elif op == "<":             match = cmc <  num
+                elif op == "<=":            match = cmc <= num
+                elif op in ("!", "!="):     match = cmc != num
+
+        elif field == "color":
+            ci = card.get("color_identity", []) if card else []
+            if value == "colorless":
+                match = len(ci) == 0
+            elif value == "multicolor":
+                match = len(ci) > 1
+            else:
+                target = COLOR_MAP.get(value, value.upper())
+                match  = target in ci
+
+        elif field == "keyword":
+            kw = " ".join(card.get("keywords", []) if card else []).lower()
+            match = value in kw
+
+        if match:
+            results.append(entry)
+
+    return results
+
+
+def show_deck_stats(deck, db):
+    cards = deck["cards"]
+    if not cards:
+        console.print("  [dim]No cards to analyze.[/dim]\n")
+        return
+
+    total = sum(c["count"] for c in cards)
+
+    BROAD_TYPES = ["Land", "Creature", "Instant", "Sorcery", "Artifact", "Enchantment", "Planeswalker", "Battle"]
+    COLOR_LABELS = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green", "C": "Colorless"}
+
+    cmc_curve   = {}   # cmc bucket (0–7) -> count, non-lands only
+    type_counts = {}   # broad type -> count
+    color_counts = {}  # color letter -> count
+    total_cmc    = 0.0
+    nonland_count = 0
+    skipped = 0
+
+    for entry in cards:
+        count = entry["count"]
+        card = db.get(entry["name"].lower())
+        if card is None and "//" in entry["name"]:
+            card = db.get(entry["name"].split("//")[0].strip().lower())
+        if card is None:
+            skipped += count
+            continue
+
+        type_line = card.get("type_line", "")
+        matched = next((t for t in BROAD_TYPES if t in type_line), "Other")
+        type_counts[matched] = type_counts.get(matched, 0) + count
+
+        ci = card.get("color_identity", [])
+        for c in (ci if ci else ["C"]):
+            color_counts[c] = color_counts.get(c, 0) + count
+
+        if matched != "Land":
+            cmc = card.get("cmc", 0) or 0
+            bucket = min(int(cmc), 7)
+            cmc_curve[bucket] = cmc_curve.get(bucket, 0) + count
+            total_cmc += cmc * count
+            nonland_count += count
+
+    avg_cmc = total_cmc / nonland_count if nonland_count else 0
+
+    console.print(f"\n  [bold cyan]── Stats: {deck['name']} ──[/bold cyan]\n")
+    console.print(f"  Total cards  {total}")
+    console.print(f"  Avg CMC      {avg_cmc:.2f}  [dim](non-lands)[/dim]")
+    if skipped:
+        console.print(f"  [yellow]  {skipped} card(s) not in DB — excluded from stats[/yellow]")
+    console.print()
+
+    if cmc_curve:
+        max_v = max(cmc_curve.values())
+        console.print("  [bold]Mana Curve[/bold]  [dim](non-lands)[/dim]")
+        for i in range(8):
+            cnt = cmc_curve.get(i, 0)
+            label = f"{i}+" if i == 7 else str(i)
+            bar = "█" * round(cnt / max_v * 24) if max_v else ""
+            console.print(f"    {label}  {bar:<24}  {cnt}")
+        console.print()
+
+    if type_counts:
+        max_v = max(type_counts.values())
+        console.print("  [bold]Card Types[/bold]")
+        for t in BROAD_TYPES + ["Other"]:
+            cnt = type_counts.get(t, 0)
+            if not cnt:
+                continue
+            bar = "█" * round(cnt / max_v * 24) if max_v else ""
+            pct = round(cnt / total * 100)
+            console.print(f"    {t:<15}  {bar:<24}  {cnt:>3}  {pct:>3}%")
+        console.print()
+
+    if color_counts:
+        max_v = max(color_counts.values())
+        console.print("  [bold]Color Identity[/bold]")
+        for letter in ["W", "U", "B", "R", "G", "C"]:
+            cnt = color_counts.get(letter, 0)
+            if not cnt:
+                continue
+            label = COLOR_LABELS[letter]
+            bar = "█" * round(cnt / max_v * 24) if max_v else ""
+            console.print(f"    {label:<10}  {bar:<24}  {cnt}")
+        console.print()
+
 
 def pick_deck(decks):
     """Show deck list and handle open / copy / delete shortcuts."""
@@ -419,7 +774,9 @@ def run_deck_manager():
             "name": deck_name,
             "created": datetime.now().strftime("%Y-%m-%d"),
             "edited": "",
+            "commander": None,
             "cards": [],
+            "sideboard": [],
         }
         mode_idx = ask_choice(
             "How do you want to start?",
@@ -427,54 +784,180 @@ def run_deck_manager():
             ["Import from card list", "Start blank"],
         )
         if mode_idx == 0:
-            cards = import_card_list()
-            deck["cards"] = cards
-            total = sum(c["count"] for c in cards)
-            print(f"\n  ✓ Imported {total} cards ({len(cards)} unique).")
+            main_cards, sb_cards, detected_cmdr = import_card_list()
+            deck["cards"]     = main_cards
+            deck["sideboard"] = sb_cards
+            if detected_cmdr:
+                deck["commander"] = detected_cmdr
+            total    = sum(c["count"] for c in main_cards)
+            sb_total = sum(c["count"] for c in sb_cards)
+            print(f"\n  ✓ Imported {total} cards ({len(main_cards)} unique).")
+            if sb_cards:
+                print(f"  ✓ Sideboard: {sb_total} cards ({len(sb_cards)} unique).")
+            if detected_cmdr:
+                print(f"  ✓ Commander detected: {detected_cmdr}")
 
-    # Deck edit loop — Live in-place update
-    cursor = 0
-    status = ""
+    # Ensure keys exist on decks loaded from older JSON files
+    deck.setdefault("sideboard", [])
+    deck.setdefault("commander", None)
 
-    with Live(build_deck_panel(deck, cursor, status), console=console, refresh_per_second=4) as live:
-        while True:
-            cards = sorted(deck["cards"], key=lambda c: c["name"])
-            key = getch()
-            status = ""
+    active_filter    = ""
+    active_filter_db = None
 
-            if key == 'UP':
-                cursor = max(0, cursor - 1)
+    # Deck edit loop — plain text menu
+    while True:
+        show_deck(deck, filter_query=active_filter, filter_db=active_filter_db)
+        console.print("  [bold cyan]A[/bold cyan] Add   [bold cyan]B[/bold cyan] +Sideboard   [bold red]D[/bold red] Delete   [bold yellow]M[/bold yellow] Commander   [bold blue]F[/bold blue] Filter   [dim]C[/dim] Check   [dim]T[/dim] Stats   [bold green]W[/bold green] Save   [dim]Q[/dim] Quit")
+        choice = (ask("Action") or "").strip().upper()
 
-            elif key == 'DOWN':
-                cursor = min(max(len(cards) - 1, 0), cursor + 1)
+        if choice == 'B':
+            sb_new = import_sideboard_list()
+            if sb_new:
+                db = get_scryfall_db()
+                sb_new = validate_card_list(sb_new, db)
+                if sb_new:
+                    deck["sideboard"] = merge_cards(deck["sideboard"], sb_new)
+                    console.print(f"\n  [green]✓ Added {len(sb_new)} card type(s) to sideboard.[/green]")
 
-            elif key in ('a', 'A'):
-                live.stop()
-                console.print()
-                new_cards = import_card_list()
-                if new_cards:
-                    deck["cards"] = merge_cards(deck["cards"], new_cards)
-                    cursor = 0
-                    status = f"Added {len(new_cards)} card type(s)."
-                live.start()
+        elif choice == 'A':
+            main_new, sb_new, detected_cmdr = import_card_list()
+            db = get_scryfall_db()
+            if main_new:
+                main_new = validate_card_list(main_new, db)
+                if main_new:
+                    deck["cards"] = merge_cards(deck["cards"], main_new)
+                    console.print(f"\n  [green]✓ Added {len(main_new)} card type(s) to main deck.[/green]")
+            if sb_new:
+                sb_new = validate_card_list(sb_new, db)
+                if sb_new:
+                    deck["sideboard"] = merge_cards(deck["sideboard"], sb_new)
+                    console.print(f"  [green]✓ Added {len(sb_new)} card type(s) to sideboard.[/green]")
+            if detected_cmdr and deck["commander"] != detected_cmdr:
+                deck["commander"] = detected_cmdr
+                console.print(f"  [green]✓ Commander updated: {detected_cmdr}[/green]")
 
-            elif key in ('d', 'D'):
-                if cards:
-                    removed = cards[cursor]["name"]
+        elif choice == 'D':
+            main_sorted = sorted(deck["cards"],             key=lambda c: c["name"])
+            sb_sorted   = sorted(deck.get("sideboard", []), key=lambda c: c["name"])
+            if not main_sorted and not sb_sorted:
+                console.print("  No cards to delete.")
+                continue
+            val = (ask("Remove (number, S# for sideboard, or name fragment)") or "").strip()
+            if not val:
+                continue
+
+            val_upper = val.upper()
+
+            # ── Numeric: S3 = sideboard slot 3, 3 = main slot 3 ──────────────
+            if re.match(r'^S\d+$', val_upper):
+                idx = int(val_upper[1:])
+                if 1 <= idx <= len(sb_sorted):
+                    removed = sb_sorted[idx - 1]["name"]
+                    deck["sideboard"] = [c for c in deck["sideboard"] if c["name"] != removed]
+                    console.print(f"\n  [green]✓ Removed '{removed}' from sideboard.[/green]")
+                else:
+                    console.print(f"  [yellow]Sideboard only has {len(sb_sorted)} card(s).[/yellow]")
+
+            elif val.isdigit():
+                idx = int(val)
+                if 1 <= idx <= len(main_sorted):
+                    removed = main_sorted[idx - 1]["name"]
                     deck["cards"] = [c for c in deck["cards"] if c["name"] != removed]
-                    cursor = min(cursor, max(len(deck["cards"]) - 1, 0))
-                    status = f"Removed '{removed}'."
+                    console.print(f"\n  [green]✓ Removed '{removed}'.[/green]")
+                else:
+                    console.print(f"  [yellow]Main deck only has {len(main_sorted)} card(s).[/yellow]")
 
-            elif key in ('s', 'S'):
-                path = save_deck(deck)
-                status = f"Saved: {os.path.basename(path)}"
-                live.update(build_deck_panel(deck, cursor, status))
-                break
+            # ── Name search across both lists ─────────────────────────────────
+            else:
+                needle = val.lower()
+                main_hits = [(i + 1, c) for i, c in enumerate(main_sorted)
+                             if needle in c["name"].lower()]
+                sb_hits   = [(i + 1, c) for i, c in enumerate(sb_sorted)
+                             if needle in c["name"].lower()]
 
-            elif key in ('q', 'Q', 'ESC'):
-                break
+                all_hits = [("main", i, c) for i, c in main_hits] + \
+                           [("sb",   i, c) for i, c in sb_hits]
 
-            live.update(build_deck_panel(deck, cursor, status))
+                if not all_hits:
+                    console.print(f"  [yellow]No card found matching '{val}'.[/yellow]")
+                elif len(all_hits) == 1:
+                    section, _, card = all_hits[0]
+                    if section == "main":
+                        deck["cards"]     = [c for c in deck["cards"]     if c["name"] != card["name"]]
+                        console.print(f"\n  [green]✓ Removed '{card['name']}'.[/green]")
+                    else:
+                        deck["sideboard"] = [c for c in deck["sideboard"] if c["name"] != card["name"]]
+                        console.print(f"\n  [green]✓ Removed '{card['name']}' from sideboard.[/green]")
+                else:
+                    console.print(f"\n  Multiple matches for '{val}':")
+                    for n, (section, slot, card) in enumerate(all_hits, 1):
+                        loc = f"main #{slot}" if section == "main" else f"sideboard S{slot}"
+                        console.print(f"    [{n}] {card['name']}  [dim]({loc})[/dim]")
+                    pick = (ask("Enter number to remove, or ENTER to cancel") or "").strip()
+                    if pick.isdigit() and 1 <= int(pick) <= len(all_hits):
+                        section, _, card = all_hits[int(pick) - 1]
+                        if section == "main":
+                            deck["cards"]     = [c for c in deck["cards"]     if c["name"] != card["name"]]
+                        else:
+                            deck["sideboard"] = [c for c in deck["sideboard"] if c["name"] != card["name"]]
+                        console.print(f"\n  [green]✓ Removed '{card['name']}'.[/green]")
+
+        elif choice == 'M':
+            cards_sorted = sorted(deck["cards"], key=lambda c: c["name"])
+            if not cards_sorted:
+                console.print("  [dim]No cards in deck yet.[/dim]")
+                continue
+            current = deck.get("commander")
+            if current:
+                console.print(f"\n  Current commander: [bold yellow]{current}[/bold yellow]")
+            console.print("  [dim]Enter a card number, part of a name, or ENTER to clear.[/dim]")
+            val = (ask("Set commander") or "").strip()
+            if not val:
+                deck["commander"] = None
+                console.print("  [dim]Commander cleared.[/dim]")
+            elif val.isdigit() and 1 <= int(val) <= len(cards_sorted):
+                deck["commander"] = cards_sorted[int(val) - 1]["name"]
+                console.print(f"\n  [green]✓ Commander: {deck['commander']}[/green]")
+            else:
+                matches = [c for c in cards_sorted if val.lower() in c["name"].lower()]
+                if len(matches) == 1:
+                    deck["commander"] = matches[0]["name"]
+                    console.print(f"\n  [green]✓ Commander: {deck['commander']}[/green]")
+                elif len(matches) > 1:
+                    console.print(f"  [yellow]Multiple matches — be more specific:[/yellow]")
+                    for m in matches:
+                        console.print(f"    {m['name']}")
+                else:
+                    console.print(f"  [yellow]No card matching '{val}' found in deck.[/yellow]")
+
+        elif choice == 'F':
+            console.print("  [dim]Filter fields: type: text: cmc: color: keyword: — or just a name fragment[/dim]")
+            console.print("  [dim]Examples:  type:creature   cmc:>=4   color:b   text:draw   keyword:flying[/dim]")
+            q = (ask("Filter query (ENTER to clear)") or "").strip()
+            if q:
+                active_filter    = q
+                active_filter_db = get_scryfall_db()
+            else:
+                active_filter    = ""
+                active_filter_db = None
+
+        elif choice == 'C':
+            db = get_scryfall_db()
+            check_deck_against_db(deck, db)
+
+        elif choice == 'T':
+            db = get_scryfall_db()
+            console.clear()
+            show_deck_stats(deck, db)
+            ask("Press ENTER to return")
+
+        elif choice == 'W':
+            path = save_deck(deck)
+            console.print(f"\n  [green]✓ Saved: {os.path.basename(path)}[/green]\n")
+            break
+
+        elif choice == 'Q':
+            break
 
 # ─── Card Lookup ──────────────────────────────────────────────────────────────
 
@@ -672,7 +1155,6 @@ def preview_and_pick_column(df):
         print("  Column not found, try again.")
 
 def find_scryfall_json():
-    header("Step 3 — Scryfall Data")
     patterns = [
         os.path.join(SCRIPT_DIR, "oracle-cards*.json"),
         os.path.join(SCRIPT_DIR, "*.json"),
@@ -684,20 +1166,17 @@ def find_scryfall_json():
     files.sort(key=os.path.getmtime, reverse=True)
 
     if not files:
-        print(f"\n  No Scryfall JSON found in {SCRIPT_DIR}")
-        print("  Download 'Oracle Cards' from: https://scryfall.com/docs/api/bulk-data")
-        print("  Then place the .json file in this folder and run again.")
+        console.print(f"\n  [red]No Scryfall JSON found in {SCRIPT_DIR}[/red]")
+        console.print("  Download 'Oracle Cards' from: https://scryfall.com/docs/api/bulk-data")
+        console.print("  Then place the .json file in this folder and run again.")
         sys.exit(1)
 
     if len(files) == 1:
-        f = files[0]
-        size_mb = os.path.getsize(f) / 1024 / 1024
-        print(f"\n  Found: {os.path.basename(f)} ({size_mb:.0f} MB)")
-        if ask_yn("Use this file?"):
-            return f
+        return files[0]
 
+    # Multiple files — ask which one to use
     labels = [f"{os.path.basename(f)}  ({os.path.getsize(f)//1024//1024} MB)" for f in files]
-    idx = ask_choice("Which Scryfall JSON?", files, labels)
+    idx = ask_choice("Multiple Scryfall JSON files found — which one?", files, labels)
     return files[idx]
 
 def load_scryfall_db(json_path):
@@ -900,6 +1379,47 @@ def print_summary(df, results, output_path, mode, not_found_names=None, blank_ro
     divider()
     print()
 
+def pipeline_interactive_fixes(not_found_names, db, db_keys):
+    """
+    After the pipeline run, show fuzzy suggestions for each unmatched card.
+    Returns a corrections dict: {original_name: matched_db_card}.
+    """
+    if not not_found_names:
+        return {}
+
+    console.print(f"\n  [bold]{len(not_found_names)} card(s) not found — searching for close matches...[/bold]\n")
+    corrections = {}
+
+    for name in not_found_names:
+        close = difflib.get_close_matches(name.lower(), db_keys, n=3, cutoff=0.6)
+        if not close:
+            console.print(f"  [dim]✗  '{name}' — no suggestions.[/dim]")
+            continue
+        console.print(f"\n  [yellow]?[/yellow]  '{name}'. Did you mean:")
+        for i, c in enumerate(close, 1):
+            console.print(f"      [{i}] {db[c]['name']}")
+        val = (ask("Enter number to use, or ENTER to skip") or "").strip()
+        if val.isdigit() and 1 <= int(val) <= len(close):
+            card = db[close[int(val) - 1]]
+            console.print(f"  [green]✓  Using: {card['name']}[/green]")
+            corrections[name] = card
+        else:
+            console.print(f"  [dim]  Skipped.[/dim]")
+
+    return corrections
+
+
+def apply_pipeline_corrections(df, name_col, results, corrections):
+    """Patch a results list in-place using a {original_name: db_card} corrections dict."""
+    for i, raw_name in enumerate(df[name_col]):
+        if pd.isna(raw_name):
+            continue
+        name = str(raw_name).strip()
+        if name in corrections:
+            results[i] = extract_fields(corrections[name])
+    return results
+
+
 def run_collection_pipeline():
     card_list_path = pick_card_list()
     if not card_list_path:
@@ -928,6 +1448,16 @@ def run_collection_pipeline():
     results, not_found_names, blank_rows, fuzzy_matches = run_pipeline(df, name_col, db)
     out_df = build_output(df, results, mode, output_path)
     print_summary(out_df, results, output_path, mode, not_found_names=not_found_names, blank_rows=blank_rows, fuzzy_matches=fuzzy_matches)
+
+    # Interactive fix pass for unmatched cards
+    if not_found_names:
+        db_keys = list(db.keys())
+        corrections = pipeline_interactive_fixes(not_found_names, db, db_keys)
+        if corrections:
+            console.print(f"\n  Rebuilding output with {len(corrections)} correction(s)...")
+            results = apply_pipeline_corrections(df, name_col, results, corrections)
+            out_df  = build_output(df, results, mode, output_path)
+            console.print(f"  [green]✓ Output updated: {os.path.basename(output_path)}[/green]\n")
 
 # ─── Main Menu ────────────────────────────────────────────────────────────────
 
