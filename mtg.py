@@ -13,6 +13,8 @@ import glob
 import difflib
 import subprocess
 import textwrap
+import tty
+import termios
 from datetime import datetime
 
 # ─── Auto-install dependencies ────────────────────────────────────────────────
@@ -42,6 +44,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+from rich.live import Live
 from rich import box
 
 console = Console()
@@ -227,6 +230,74 @@ def delete_deck(deck):
     if path and os.path.exists(path):
         os.remove(path)
 
+def getch():
+    """Read a single keypress without requiring Enter. Handles arrow keys."""
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        ch = sys.stdin.buffer.read(1)
+        if ch == b'\x03':
+            raise KeyboardInterrupt
+        if ch == b'\x1b':
+            ch2 = sys.stdin.buffer.read(1)
+            ch3 = sys.stdin.buffer.read(1)
+            if ch2 == b'[':
+                if ch3 == b'A': return 'UP'
+                if ch3 == b'B': return 'DOWN'
+            return 'ESC'
+        return ch.decode('utf-8', errors='replace')
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+def build_deck_panel(deck, cursor, status=""):
+    """Build the interactive deck view as a Rich renderable."""
+    cards = sorted(deck["cards"], key=lambda c: c["name"])
+    total = sum(c["count"] for c in deck["cards"])
+
+    table = Table.grid(padding=(0, 1))
+    table.add_column(width=2)
+    table.add_column(width=4, justify="right")
+    table.add_column()
+
+    if not cards:
+        table.add_row(" ", "", "[dim]No cards yet — press A to add[/dim]")
+    else:
+        for i, card in enumerate(cards):
+            if i == cursor:
+                table.add_row(
+                    "[bold cyan]▶[/bold cyan]",
+                    f"[bold cyan]{card['count']}x[/bold cyan]",
+                    f"[bold cyan]{card['name']}[/bold cyan]",
+                )
+            else:
+                table.add_row(" ", f"[dim]{card['count']}x[/dim]", card["name"])
+
+    hints = Text.from_markup(
+        "\n [dim]↑↓[/dim] Navigate   "
+        "[bold cyan]A[/bold cyan] Add   "
+        "[bold red]D[/bold red] Delete   "
+        "[bold green]S[/bold green] Save   "
+        "[dim]Q[/dim] Quit"
+    )
+
+    body = Table.grid()
+    body.add_row(Text(""))
+    body.add_row(table)
+    body.add_row(hints)
+    if status:
+        body.add_row(Text.from_markup(f"\n [green]✓ {status}[/green]"))
+    else:
+        body.add_row(Text(""))
+
+    return Panel(
+        body,
+        title=f"[bold cyan]{deck['name']}[/bold cyan]",
+        subtitle=f"[dim]{total} cards[/dim]",
+        border_style="cyan",
+        box=box.ROUNDED,
+    )
+
 def print_deck(deck):
     total = sum(c["count"] for c in deck["cards"])
     header(f"Deck: {deck['name']}  ({total} cards)")
@@ -328,41 +399,46 @@ def run_deck_manager():
             total = sum(c["count"] for c in cards)
             print(f"\n  ✓ Imported {total} cards ({len(cards)} unique).")
 
-    # Deck edit loop
+    # Deck edit loop — keyboard driven
+    cursor = 0
+    status = ""
+
     while True:
-        print_deck(deck)
-        action_idx = ask_choice(
-            "What would you like to do?",
-            ["add", "remove", "save", "back"],
-            [
-                "Add cards",
-                "Remove a card",
-                "Save and return to menu",
-                "Return without saving",
-            ],
-        )
+        cards = sorted(deck["cards"], key=lambda c: c["name"])
 
-        if action_idx == 0:
+        with Live(build_deck_panel(deck, cursor, status), console=console, refresh_per_second=4):
+            key = getch()
+
+        status = ""
+
+        if key == 'UP':
+            cursor = max(0, cursor - 1)
+
+        elif key == 'DOWN':
+            cursor = min(max(len(cards) - 1, 0), cursor + 1)
+
+        elif key in ('a', 'A'):
+            console.print()
             new_cards = import_card_list()
-            deck["cards"] = merge_cards(deck["cards"], new_cards)
-            print(f"  ✓ Added {len(new_cards)} card type(s).")
+            if new_cards:
+                deck["cards"] = merge_cards(deck["cards"], new_cards)
+                cursor = 0
+                status = f"Added {len(new_cards)} card type(s)."
 
-        elif action_idx == 1:
-            name = ask("Card name to remove")
-            if name:
-                before = len(deck["cards"])
-                deck["cards"] = [c for c in deck["cards"] if c["name"].lower() != name.lower()]
-                if len(deck["cards"]) < before:
-                    print(f"  ✓ Removed '{name}'.")
-                else:
-                    print(f"  Card '{name}' not found.")
+        elif key in ('d', 'D'):
+            if cards:
+                removed = cards[cursor]["name"]
+                deck["cards"] = [c for c in deck["cards"] if c["name"] != removed]
+                cursor = min(cursor, max(len(deck["cards"]) - 1, 0))
+                status = f"Removed '{removed}'."
 
-        elif action_idx == 2:
+        elif key in ('s', 'S'):
             path = save_deck(deck)
-            print(f"\n  ✓ Saved: {os.path.basename(path)}\n")
+            status = f"Saved: {os.path.basename(path)}"
+            console.print(build_deck_panel(deck, cursor, status))
             break
 
-        else:
+        elif key in ('q', 'Q', 'ESC'):
             break
 
 # ─── Card Lookup ──────────────────────────────────────────────────────────────

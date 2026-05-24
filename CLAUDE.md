@@ -118,6 +118,16 @@ Parsed by `parse_card_list()`. A line with no leading number defaults to count 1
 
 ---
 
+## Future: Textual Migration
+
+The deck view currently uses `Rich.Live` + raw keyboard input (`tty`/`termios`) for interactivity.
+
+If the app grows to need true mouse support, scrollable lists, clickable buttons, or multi-pane layouts, the right move is to migrate the deck view to **Textual** (https://textual.textualize.io). Textual is built on Rich by the same author and supports full mouse interaction, reactive components, and CSS-like layouts. It's the natural upgrade path.
+
+Do not start this migration without discussing it — it's a meaningful rewrite of the deck view.
+
+---
+
 ## Planned Features (do not build until discussed)
 
 - Claude API integration for deck suggestions and card explainer
