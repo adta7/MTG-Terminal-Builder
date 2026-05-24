@@ -279,6 +279,222 @@ This keeps the app easy to navigate and easy to extend — adding a new feature 
 
 ---
 
+## 2026-05-24
+
+### Raw Terminal Mode and ESC Detection
+
+Terminals run in two modes:
+
+- **Cooked mode** (normal) — the OS buffers input line-by-line. `input()` lives here. The user types, edits, and presses ENTER before your code sees anything. ESC is just a character in the buffer — you can't intercept it mid-line.
+- **Raw mode** — every keypress arrives immediately, one byte at a time. No line buffering, no echo, no special key processing. This is how vim, htop, and less work.
+
+To enter raw mode in Python:
+
+```python
+import tty, termios, sys
+
+fd = sys.stdin.fileno()
+old = termios.tcgetattr(fd)   # save current settings
+try:
+    tty.setraw(fd)
+    ch = sys.stdin.buffer.read(1)  # single byte, no ENTER needed
+finally:
+    termios.tcsetattr(fd, termios.TCSADRAIN, old)  # ALWAYS restore
+```
+
+**Always restore in a `finally` block.** If your code crashes while in raw mode, the terminal stays broken — the user can't see what they're typing. `finally` runs even on exceptions.
+
+---
+
+### ESC Key Detection: The Timeout Problem
+
+The ESC key sends `\x1b` to the terminal. Arrow keys also start with `\x1b`, followed by `[A`, `[B`, `[C`, `[D`. The problem: you can't tell if `\x1b` is a bare ESC or the start of an arrow key until you check what comes next.
+
+**The wrong approach** (original code):
+```python
+if ch == b'\x1b':
+    ch2 = sys.stdin.buffer.read(1)   # BLOCKS if nothing follows
+    ch3 = sys.stdin.buffer.read(1)   # Same
+```
+If the user presses bare ESC, this blocks waiting for bytes that never arrive. The terminal freezes.
+
+**The right approach** — use `select.select` with a 50ms timeout:
+```python
+import select
+
+if ch == b'\x1b':
+    if select.select([sys.stdin], [], [], 0.05)[0]:  # wait 50ms
+        ch2 = sys.stdin.buffer.read(1)
+        if ch2 == b'[' and select.select([sys.stdin], [], [], 0.05)[0]:
+            ch3 = sys.stdin.buffer.read(1)
+            if ch3 == b'A': return 'UP'
+            if ch3 == b'B': return 'DOWN'
+    return 'ESC'   # nothing followed within 50ms — it's a bare ESC
+```
+
+`select.select([stdin], [], [], timeout)` returns immediately if bytes are available, or after `timeout` seconds if not. 50ms is long enough for arrow-key sequences (they arrive nearly simultaneously) but short enough to feel instant to the user.
+
+---
+
+### The `_ESCAPE` Sentinel Pattern
+
+When a function can return either a value or "the user cancelled", you need a way to distinguish "user pressed ENTER with nothing typed" from "user pressed ESC". Using `None` for both is ambiguous.
+
+Solution: use a sentinel object — a unique value that means exactly one thing:
+
+```python
+_ESCAPE = object()   # module-level singleton
+```
+
+`object()` creates a new object with a unique identity. Nothing else in the program will ever `is _ESCAPE` unless it's this exact object. Callers check with `is`:
+
+```python
+val = ask_escapable("Enter a name")
+if val is _ESCAPE:
+    return   # user cancelled — go back
+if not val:
+    ...      # user pressed ENTER with nothing — different behavior
+```
+
+This pattern works for any "cancel" signal. It's cleaner than exceptions for local control flow and clearer than `None` when `None` is a valid value.
+
+---
+
+### `\r\n` vs `\n` in Raw Mode
+
+In normal (cooked) mode, the terminal converts `\n` to `\r\n` for you — the cursor moves down AND returns to column 0. In raw mode, that conversion is disabled. `\n` moves the cursor down but NOT left, so every subsequent line starts further right.
+
+**Symptom:** output looks like a staircase after raw-mode input.
+
+**Fix:** always write `\r\n` in raw mode:
+```python
+sys.stdout.write('\r\n')   # in raw mode — correct
+sys.stdout.write('\n')     # in raw mode — cursor stays in wrong column
+```
+
+Also applies to Ctrl+C handlers: if you `print()` inside a `KeyboardInterrupt` handler while still in raw mode, the newline misbehaves. Restore the terminal first, then print:
+```python
+except KeyboardInterrupt:
+    termios.tcsetattr(fd, termios.TCSADRAIN, old)  # restore FIRST
+    sys.stdout.write('\r\n\r\nAborted.\r\n')
+    sys.exit(0)
+```
+
+---
+
+### Multi-Byte UTF-8 in Raw Mode
+
+ASCII characters are one byte. Accented characters (like `û` in *Lim-Dûl's Vault*) are 2–4 bytes in UTF-8. In raw mode, reading one byte at a time breaks multi-byte characters — each byte decoded alone raises `UnicodeDecodeError` and gets silently dropped.
+
+The first byte tells you how many bytes follow:
+- `0xxxxxxx` — 1 byte (plain ASCII)
+- `110xxxxx` — 2-byte sequence (need 1 more)
+- `1110xxxx` — 3-byte sequence (need 2 more)
+- `11110xxx` — 4-byte sequence (need 3 more)
+
+Fix — read continuation bytes before decoding:
+```python
+first = ch[0]
+if   first & 0xF8 == 0xF0: extra = 3
+elif first & 0xF0 == 0xE0: extra = 2
+elif first & 0xE0 == 0xC0: extra = 1
+else:                       extra = 0
+
+for _ in range(extra):
+    if select.select([sys.stdin], [], [], 0.02)[0]:
+        ch += sys.stdin.buffer.read(1)
+
+c = ch.decode('utf-8')
+```
+
+---
+
+### Extracting a Shared Raw-Input Helper
+
+When multiple prompts all need the same raw-mode behavior (ESC detection, backspace, UTF-8, `\r\n`), don't copy the logic into each one. Extract a single `_read_raw_line(prompt)` helper:
+
+```python
+def _read_raw_line(prompt):
+    """Writes prompt, reads a line in raw mode. Returns _ESCAPE on ESC."""
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    # ... raw mode loop ...
+    # Returns _ESCAPE or the raw string
+```
+
+Then build higher-level helpers on top of it:
+```python
+def ask_escapable(prompt, default=None):
+    result = _read_raw_line(f"  {prompt}: ")
+    if result is _ESCAPE: return _ESCAPE
+    val = result.strip()
+    return val if val else default
+
+def ask_yn(prompt, default="y"):
+    result = _read_raw_line(f"  {prompt} (Y/n): ")
+    if result is _ESCAPE: return None
+    ...
+
+def ask_choice(prompt, options, ...):
+    result = _read_raw_line("  Choice: ")
+    if result is _ESCAPE: return None
+    ...
+
+# _collect_lines (card list paste) also uses _read_raw_line("  > ")
+```
+
+**The rule:** if two prompts share behavior, extract it. Three is definitely time to extract.
+
+---
+
+### Designing ESC Navigation
+
+ESC should do something consistent at every level. Design it like a stack:
+
+| Level | ESC does |
+|---|---|
+| Deck editor main menu | Save prompt → return to deck list |
+| Deck editor sub-action (D, M, F) | Cancel action → back to deck view |
+| Card paste session (A, B) | Cancel paste → back to deck editor |
+| Card lookup | Exit → main menu |
+| Pipeline wizard step | Cancel pipeline → main menu |
+| Pick deck list | Back → main menu |
+
+The key insight: **ESC means "go back one level."** It's not "quit the app" (that's Ctrl+C) and it's not "confirm" (that's ENTER). Every prompt in the app should have a clear answer to "what does ESC do here?"
+
+---
+
+### Mistakes / Fixes
+
+**Problem:** `ask()` uses `input()`. ESC pressed during `input()` doesn't interrupt — the escape character (`\x1b`) is buffered and returned as part of the string when ENTER is pressed. This means pressing ESC while entering a deck name would embed `\x1b` into the filename.
+**Fix:** Replace `ask()` with `ask_escapable()` anywhere the user might want to cancel.
+
+**Problem:** `validate_card_list()` and `_check_card_list_against_db()` used `ask()` for fuzzy match selection. Pressing ESC at those prompts typed raw `^[^[` escape bytes into the input.
+**Fix:** `ask_escapable()` at every interactive sub-prompt.
+
+**Problem:** `getch()` read two bytes unconditionally after seeing `\x1b`. Pressing bare ESC froze the terminal waiting for bytes that never arrived.
+**Fix:** `select.select` with 50ms timeout before reading follow-up bytes.
+
+**Problem:** The `ask_choice()` "cancel" mechanism was `[0]` typed as text because `input()` can't detect ESC. This was inconsistent with all other prompts using ESC.
+**Fix:** Migrate `ask_choice()` to `_read_raw_line()` — ESC now works there too, and the `[0] Cancel` display is gone.
+
+---
+
+### Testing Terminal Apps
+
+Pure logic functions (parsers, filters, data transformers) can be unit tested normally with `python3 -c` or a test script — import the module, call the functions, check results.
+
+Interactive functions (anything using `input()`, `getch()`, `tty.setraw()`) can't be easily automated. Test them manually or with careful code review:
+
+1. Read every call site that handles user input
+2. Trace every return path (ENTER, ESC, valid input, invalid input, empty input)
+3. Check that no path leaves the terminal in raw mode
+4. Check that no path embeds control characters into data
+
+`python3 -m py_compile script.py` catches syntax errors. Beyond that, a focused code read of the input paths beats writing fragile test harnesses for terminal UIs.
+
+---
+
 ### Small Advice
 
 - `git commit` is cheap. Commit often so you always have a safe point to go back to.
