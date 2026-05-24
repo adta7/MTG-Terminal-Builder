@@ -1,6 +1,6 @@
 """
-mtg.py — MTG Pipeline (Interactive)
-Single command to enrich your card collection with Scryfall data.
+mtg.py — MTG Terminal Builder
+Interactive terminal tool for Magic: The Gathering deck building and collection management.
 
 Usage:
     python3 mtg.py
@@ -17,16 +17,13 @@ from datetime import datetime
 # ─── Auto-install dependencies ────────────────────────────────────────────────
 
 def ensure_dependencies():
-    """Check and auto-install required packages."""
     required = {"pandas": "pandas", "openpyxl": "openpyxl"}
     missing = []
-
     for module_name, package_name in required.items():
         try:
             __import__(module_name)
         except ImportError:
             missing.append(package_name)
-
     if missing:
         print(f"\n  Installing required packages: {', '.join(missing)}...")
         try:
@@ -40,10 +37,11 @@ ensure_dependencies()
 
 import pandas as pd
 
+# ─── Constants ────────────────────────────────────────────────────────────────
+
 DOWNLOADS = os.path.expanduser("~/Downloads")
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# ─── Columns for deckbuilding export ──────────────────────────────────────────
+DECKS_DIR = os.path.join(SCRIPT_DIR, "decks")
 
 DECKBUILDING_COLUMNS = [
     "Name", "Count", "Foil",
@@ -101,7 +99,6 @@ def ask_yn(prompt, default="y"):
     return val.startswith("y")
 
 def ask_choice(prompt, options, labels=None):
-    """Show a numbered list and return the chosen index (0-based)."""
     print(f"\n  {prompt}")
     for i, opt in enumerate(options):
         label = labels[i] if labels else opt
@@ -116,7 +113,319 @@ def ask_choice(prompt, options, labels=None):
             return int(val) - 1
         print(f"  Please enter a number between 1 and {len(options)}.")
 
-# ─── Step 1: Find card list ───────────────────────────────────────────────────
+# ─── Scryfall DB (lazy load, shared) ──────────────────────────────────────────
+
+_scryfall_db = None
+
+def get_scryfall_db():
+    global _scryfall_db
+    if _scryfall_db is None:
+        json_path = find_scryfall_json()
+        _scryfall_db = load_scryfall_db(json_path)
+    return _scryfall_db
+
+# ─── Deck Manager ─────────────────────────────────────────────────────────────
+
+def ensure_decks_dir():
+    os.makedirs(DECKS_DIR, exist_ok=True)
+
+def list_decks():
+    ensure_decks_dir()
+    files = glob.glob(os.path.join(DECKS_DIR, "*.json"))
+    decks = []
+    for f in files:
+        try:
+            with open(f) as fh:
+                data = json.load(fh)
+            decks.append({
+                "path": f,
+                "name": data.get("name", os.path.basename(f)),
+                "created": data.get("created", ""),
+                "edited": data.get("edited", ""),
+                "cards": data.get("cards", []),
+            })
+        except Exception:
+            pass
+    decks.sort(key=lambda d: d["edited"], reverse=True)
+    return decks
+
+def save_deck(deck):
+    ensure_decks_dir()
+    safe_name = deck["name"].lower().replace(" ", "_")
+    path = deck.get("path") or os.path.join(DECKS_DIR, f"{safe_name}.json")
+    deck["edited"] = datetime.now().strftime("%Y-%m-%d")
+    with open(path, "w") as f:
+        json.dump({k: v for k, v in deck.items() if k != "path"}, f, indent=2)
+    return path
+
+def parse_card_list(lines):
+    cards = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split(" ", 1)
+        if len(parts) == 2 and parts[0].isdigit():
+            cards.append({"name": parts[1].strip(), "count": int(parts[0])})
+        else:
+            cards.append({"name": line, "count": 1})
+    return cards
+
+def import_card_list():
+    print("\n  Paste your card list below.")
+    print("  Format: '4 Lightning Bolt' (one card per line)")
+    print("  Type END on a new line when done.\n")
+    lines = []
+    while True:
+        try:
+            line = input("  > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n\nAborted.")
+            sys.exit(0)
+        if line.upper() == "END":
+            break
+        lines.append(line)
+    return parse_card_list(lines)
+
+def merge_cards(existing_cards, new_cards):
+    index = {c["name"].lower(): c for c in existing_cards}
+    for card in new_cards:
+        key = card["name"].lower()
+        if key in index:
+            index[key]["count"] += card["count"]
+        else:
+            existing_cards.append(card)
+            index[key] = card
+    return existing_cards
+
+def deck_to_text(deck):
+    lines = []
+    for card in sorted(deck["cards"], key=lambda c: c["name"]):
+        lines.append(f"{card['count']} {card['name']}")
+    return "\n".join(lines)
+
+def copy_to_clipboard(text):
+    try:
+        subprocess.run("pbcopy", input=text.encode(), check=True)
+        return True
+    except Exception:
+        return False
+
+def delete_deck(deck):
+    path = deck.get("path")
+    if path and os.path.exists(path):
+        os.remove(path)
+
+def print_deck(deck):
+    total = sum(c["count"] for c in deck["cards"])
+    header(f"Deck: {deck['name']}  ({total} cards)")
+    if not deck["cards"]:
+        print("\n  No cards yet.\n")
+        return
+    print()
+    for card in sorted(deck["cards"], key=lambda c: c["name"]):
+        print(f"    {card['count']}x  {card['name']}")
+    print()
+
+def pick_deck(decks):
+    """Show deck list and handle open / copy / delete shortcuts."""
+    new_idx = len(decks) + 1
+
+    print(f"\n  Your decks:")
+    for i, d in enumerate(decks, start=1):
+        print(f"    [{i}] {d['name']}  (edited {d['edited']})")
+    print(f"    [{new_idx}] ── Create New Deck ──")
+    print()
+    print(f"  Shortcuts:  [N] open  [N2] copy to clipboard  [N0] delete")
+
+    while True:
+        try:
+            val = input("  Choice: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n\nAborted.")
+            sys.exit(0)
+
+        if not val.isdigit():
+            print(f"  Please enter a valid number.")
+            continue
+
+        # Split into deck number and optional action suffix
+        if val.endswith("2") and len(val) > 1:
+            deck_num = int(val[:-1])
+            action = "copy"
+        elif val.endswith("0") and len(val) > 1:
+            deck_num = int(val[:-1])
+            action = "delete"
+        else:
+            deck_num = int(val)
+            action = "open"
+
+        if deck_num == new_idx and action == "open":
+            return "new", None
+
+        if 1 <= deck_num <= len(decks):
+            return action, decks[deck_num - 1]
+
+        print(f"  Please enter a number between 1 and {new_idx}.")
+
+def run_deck_manager():
+    header("Deck Manager")
+    decks = list_decks()
+
+    action, deck = pick_deck(decks)
+
+    # Copy to clipboard
+    if action == "copy":
+        text = deck_to_text(deck)
+        if copy_to_clipboard(text):
+            total = sum(c["count"] for c in deck["cards"])
+            print(f"\n  ✓ Copied {total} cards from '{deck['name']}' to clipboard.\n")
+        else:
+            print(f"\n  ✗ Clipboard copy failed (pbcopy not available).\n")
+        return
+
+    # Delete deck
+    if action == "delete":
+        print(f"\n  Delete '{deck['name']}'? This cannot be undone.")
+        if ask_yn("Confirm delete", default="n"):
+            delete_deck(deck)
+            print(f"  ✓ Deleted '{deck['name']}'.\n")
+        else:
+            print("  Cancelled.\n")
+        return
+
+    # Create new deck
+    if action == "new":
+        deck_name = ask("Deck name")
+        if not deck_name:
+            print("  No name entered. Returning to menu.\n")
+            return
+        deck = {
+            "name": deck_name,
+            "created": datetime.now().strftime("%Y-%m-%d"),
+            "edited": "",
+            "cards": [],
+        }
+        mode_idx = ask_choice(
+            "How do you want to start?",
+            ["import", "blank"],
+            ["Import from card list", "Start blank"],
+        )
+        if mode_idx == 0:
+            cards = import_card_list()
+            deck["cards"] = cards
+            total = sum(c["count"] for c in cards)
+            print(f"\n  ✓ Imported {total} cards ({len(cards)} unique).")
+
+    # Deck edit loop
+    while True:
+        print_deck(deck)
+        action_idx = ask_choice(
+            "What would you like to do?",
+            ["add", "remove", "save", "back"],
+            [
+                "Add cards",
+                "Remove a card",
+                "Save and return to menu",
+                "Return without saving",
+            ],
+        )
+
+        if action_idx == 0:
+            new_cards = import_card_list()
+            deck["cards"] = merge_cards(deck["cards"], new_cards)
+            print(f"  ✓ Added {len(new_cards)} card type(s).")
+
+        elif action_idx == 1:
+            name = ask("Card name to remove")
+            if name:
+                before = len(deck["cards"])
+                deck["cards"] = [c for c in deck["cards"] if c["name"].lower() != name.lower()]
+                if len(deck["cards"]) < before:
+                    print(f"  ✓ Removed '{name}'.")
+                else:
+                    print(f"  Card '{name}' not found.")
+
+        elif action_idx == 2:
+            path = save_deck(deck)
+            print(f"\n  ✓ Saved: {os.path.basename(path)}\n")
+            break
+
+        else:
+            break
+
+# ─── Card Lookup ──────────────────────────────────────────────────────────────
+
+def print_card(card):
+    divider()
+    name = card.get("name", "Unknown")
+    mana = card.get("mana_cost", "")
+    if "card_faces" in card:
+        mana = " // ".join(f.get("mana_cost", "") for f in card["card_faces"] if f.get("mana_cost"))
+    print(f"  {name}  {mana}")
+    print(f"  {card.get('type_line', '')}")
+    divider()
+
+    if "card_faces" in card:
+        for face in card["card_faces"]:
+            if face.get("oracle_text"):
+                print(f"\n  [{face.get('name', '')}]")
+                print(f"  {face['oracle_text']}")
+    elif card.get("oracle_text"):
+        print(f"\n  {card['oracle_text']}")
+
+    if card.get("power") or card.get("toughness"):
+        print(f"\n  Power / Toughness: {card.get('power', '?')}/{card.get('toughness', '?')}")
+    if card.get("loyalty"):
+        print(f"\n  Loyalty: {card['loyalty']}")
+
+    legalities = card.get("legalities", {})
+    if legalities:
+        print(f"\n  Legality:")
+        for fmt in ["commander", "modern", "standard"]:
+            status = legalities.get(fmt, "unknown").capitalize()
+            print(f"    {fmt.capitalize():<12} {status}")
+
+    set_name = card.get("set_name", "")
+    rarity = card.get("rarity", "").capitalize()
+    if set_name or rarity:
+        print(f"\n  {set_name}  —  {rarity}")
+
+    divider()
+    print()
+
+def run_card_lookup():
+    header("Card Lookup")
+    db = get_scryfall_db()
+
+    while True:
+        name = ask("Card name (or press ENTER to go back)")
+        if not name:
+            break
+
+        card = db.get(name.lower())
+
+        if card is None and "//" in name:
+            front = name.split("//")[0].strip()
+            card = db.get(front.lower())
+
+        if card is None:
+            close = difflib.get_close_matches(name.lower(), list(db.keys()), n=3, cutoff=0.6)
+            if close:
+                print(f"\n  '{name}' not found. Did you mean:")
+                for i, c in enumerate(close):
+                    print(f"    [{i+1}] {db[c]['name']}")
+                val = ask("Enter number to select, or ENTER to skip")
+                if val and val.isdigit() and 1 <= int(val) <= len(close):
+                    card = db[close[int(val) - 1]]
+            else:
+                print(f"  No match found for '{name}'.\n")
+                continue
+
+        if card:
+            print_card(card)
+
+# ─── Collection Enhancer Pipeline ─────────────────────────────────────────────
 
 def find_card_lists():
     patterns = [
@@ -126,7 +435,6 @@ def find_card_lists():
     files = []
     for p in patterns:
         files.extend(glob.glob(p))
-    # Sort by most recently modified
     files.sort(key=os.path.getmtime, reverse=True)
     return files
 
@@ -138,8 +446,8 @@ def pick_card_list():
         print(f"\n  No .csv or .xlsx files found in {DOWNLOADS}.")
         path = ask("Enter full path to your card list")
         if not path or not os.path.exists(path):
-            print("  File not found. Exiting.")
-            sys.exit(1)
+            print("  File not found. Returning to menu.")
+            return None
         return path
 
     if len(files) == 1:
@@ -150,7 +458,6 @@ def pick_card_list():
         path = ask("Enter full path to your card list")
         return path
 
-    # Multiple files — show picker
     labels = [f"{os.path.basename(f)}  ({_mod_date(f)})" for f in files[:10]]
     idx = ask_choice("Multiple files found in Downloads — which one?", files[:10], labels)
     return files[idx]
@@ -159,8 +466,6 @@ def _mod_date(path):
     ts = os.path.getmtime(path)
     return datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
 
-# ─── Step 2: Load & preview spreadsheet ──────────────────────────────────────
-
 def load_spreadsheet(path):
     if path.endswith(".csv"):
         return pd.read_csv(path)
@@ -168,32 +473,23 @@ def load_spreadsheet(path):
 
 def preview_and_pick_column(df):
     header("Step 2 — Name Column")
-
-    # Auto-detect candidates
-    candidates = [c for c in df.columns if any(
-        k in c.strip().lower() for k in ["name", "card", "title"]
-    )]
+    candidates = [c for c in df.columns if any(k in c.strip().lower() for k in ["name", "card", "title"])]
     auto = candidates[0] if candidates else df.columns[0]
 
-    # Show preview — first 5 rows, first 5 columns
     preview_cols = list(df.columns[:5])
     print(f"\n  Preview (first 5 rows):\n")
     preview = df[preview_cols].head(5).fillna("")
-    # Print header row
     col_widths = [max(len(str(c)), preview[c].astype(str).str.len().max()) for c in preview_cols]
     col_widths = [min(w, 30) for w in col_widths]
-    header_row = "  " + "  ".join(str(c).ljust(w) for c, w in zip(preview_cols, col_widths))
-    print(header_row)
+    print("  " + "  ".join(str(c).ljust(w) for c, w in zip(preview_cols, col_widths)))
     print("  " + "  ".join("─" * w for w in col_widths))
     for _, row in preview.iterrows():
         print("  " + "  ".join(str(row[c])[:w].ljust(w) for c, w in zip(preview_cols, col_widths)))
 
     print(f"\n  Detected name column: '{auto}'")
-
     if ask_yn("Is this correct?"):
         return auto
 
-    # Show all columns and let user pick
     print("\n  All columns:")
     for i, col in enumerate(df.columns):
         print(f"    [{i+1}] {col}")
@@ -204,8 +500,6 @@ def preview_and_pick_column(df):
         if val in df.columns:
             return val
         print("  Column not found, try again.")
-
-# ─── Step 3: Find Scryfall JSON ───────────────────────────────────────────────
 
 def find_scryfall_json():
     header("Step 3 — Scryfall Data")
@@ -248,8 +542,6 @@ def load_scryfall_db(json_path):
     print(f"  Loaded {len(db):,} unique cards.")
     return db
 
-# ─── Step 4: Export mode ──────────────────────────────────────────────────────
-
 def pick_export_mode():
     header("Step 4 — Export Mode")
     idx = ask_choice(
@@ -262,8 +554,6 @@ def pick_export_mode():
     )
     return ["deckbuilding", "full"][idx]
 
-# ─── Step 5: Output filename ──────────────────────────────────────────────────
-
 def pick_output_name(input_path, mode):
     header("Step 5 — Output Filename")
     default_stem = os.path.splitext(os.path.basename(input_path))[0]
@@ -275,8 +565,6 @@ def pick_output_name(input_path, mode):
     full_path = os.path.join(DOWNLOADS, filename)
     print(f"\n  Will save as: {filename}")
     return full_path
-
-# ─── Scryfall lookup ──────────────────────────────────────────────────────────
 
 def extract_fields(card):
     if card is None:
@@ -324,8 +612,6 @@ def extract_fields(card):
         "error": None,
     }
 
-# ─── Run pipeline ─────────────────────────────────────────────────────────────
-
 def run_pipeline(df, name_col, db):
     header("Running Pipeline")
     print()
@@ -364,23 +650,17 @@ def run_pipeline(df, name_col, db):
     print()
     return results, not_found_names, blank_rows, fuzzy_matches
 
-# ─── Build output ─────────────────────────────────────────────────────────────
-
 def build_output(df, results, mode, output_path):
     enriched = pd.concat([df.reset_index(drop=True), pd.DataFrame(results)], axis=1)
 
     if mode == "deckbuilding":
-        # Drop not-found cards
         out = enriched[enriched["error"].isna()].copy() if "error" in enriched.columns else enriched.copy()
         available = [c for c in DECKBUILDING_COLUMNS if c in out.columns]
         out = out[available].copy()
         out.rename(columns=DECKBUILDING_RENAME, inplace=True)
-
-        # Sort by CMC then Name
         sort_cols = [c for c in ["CMC", "Name"] if c in out.columns]
         if sort_cols:
             out.sort_values(sort_cols, inplace=True, ignore_index=True)
-
         for col in ["Commander Legal", "Modern Legal", "Standard Legal"]:
             if col in out.columns:
                 out[col] = out[col].str.capitalize()
@@ -400,11 +680,8 @@ def build_output(df, results, mode, output_path):
 
     return out
 
-# ─── Summary ──────────────────────────────────────────────────────────────────
-
 def print_summary(df, results, output_path, mode, not_found_names=None, blank_rows=0, fuzzy_matches=None):
     header("Summary")
-
     found = sum(1 for r in results if r.get("error") is None)
     not_found_count = len(not_found_names) if not_found_names else 0
     fuzzy_count = len(fuzzy_matches) if fuzzy_matches else 0
@@ -417,13 +694,7 @@ def print_summary(df, results, output_path, mode, not_found_names=None, blank_ro
     print(f"  Export mode:     {mode}")
     print(f"\n  Saved to: {output_path}")
 
-    # Type breakdown (top 8)
-    type_col = None
-    for col in ["type_line", "Type"]:
-        if col in df.columns:
-            type_col = col
-            break
-
+    type_col = next((c for c in ["type_line", "Type"] if c in df.columns), None)
     if type_col:
         types = df[type_col].dropna().str.split("—").str[0].str.strip().value_counts()
         max_count = types.iloc[0] if len(types) else 1
@@ -434,13 +705,7 @@ def print_summary(df, results, output_path, mode, not_found_names=None, blank_ro
             pct = round(count / total_types * 100)
             print(f"    {t:<30} {count:>4}  {bar:<20}  {pct:>3}%")
 
-    # Color identity breakdown (top 8)
-    ci_col = None
-    for col in ["color_identity", "Color Identity"]:
-        if col in df.columns:
-            ci_col = col
-            break
-
+    ci_col = next((c for c in ["color_identity", "Color Identity"] if c in df.columns), None)
     if ci_col:
         ci = df[ci_col].fillna("Colorless").value_counts()
         max_count = ci.iloc[0] if len(ci) else 1
@@ -452,13 +717,11 @@ def print_summary(df, results, output_path, mode, not_found_names=None, blank_ro
             pct = round(count / total_ci * 100)
             print(f"    {label:<30} {count:>4}  {bar:<20}  {pct:>3}%")
 
-    # Auto-corrected list
     if fuzzy_matches:
         print(f"\n  Auto-corrected ({len(fuzzy_matches)}):")
         for original, matched in fuzzy_matches:
             print(f"    ~  \"{original}\"  →  {matched}")
 
-    # Not found list
     if not_found_names:
         print(f"\n  Cards not found in Scryfall ({len(not_found_names)}):")
         for name in sorted(not_found_names):
@@ -467,36 +730,19 @@ def print_summary(df, results, output_path, mode, not_found_names=None, blank_ro
     divider()
     print()
 
-# ─── Main ─────────────────────────────────────────────────────────────────────
-
-def main():
-    print()
-    print("  ╔══════════════════════════════════════╗")
-    print("  ║         MTG Pipeline  🃏              ║")
-    print("  ║   Collection Enrichment Tool         ║")
-    print("  ╚══════════════════════════════════════╝")
-    print()
-
-    # Step 1: Card list
+def run_collection_pipeline():
     card_list_path = pick_card_list()
-    print(f"\n  Using: {card_list_path}")
+    if not card_list_path:
+        return
 
-    # Step 2: Load & preview
     df = load_spreadsheet(card_list_path)
     name_col = preview_and_pick_column(df)
     print(f"\n  Name column: '{name_col}'  ({len(df)} cards total)")
 
-    # Step 3: Scryfall JSON
-    json_path = find_scryfall_json()
-    db = load_scryfall_db(json_path)
-
-    # Step 4: Export mode
+    db = get_scryfall_db()
     mode = pick_export_mode()
-
-    # Step 5: Output name
     output_path = pick_output_name(card_list_path, mode)
 
-    # Confirm before running
     print()
     divider()
     print(f"  Ready to run!")
@@ -507,12 +753,44 @@ def main():
     print()
     if not ask_yn("Start the pipeline?"):
         print("  Cancelled.")
-        sys.exit(0)
+        return
 
-    # Run
     results, not_found_names, blank_rows, fuzzy_matches = run_pipeline(df, name_col, db)
     out_df = build_output(df, results, mode, output_path)
     print_summary(out_df, results, output_path, mode, not_found_names=not_found_names, blank_rows=blank_rows, fuzzy_matches=fuzzy_matches)
+
+# ─── Main Menu ────────────────────────────────────────────────────────────────
+
+def main():
+    while True:
+        print()
+        print("  ╔══════════════════════════════════════╗")
+        print("  ║      MTG Terminal Builder  🃏         ║")
+        print("  ╚══════════════════════════════════════╝")
+        print()
+
+        idx = ask_choice(
+            "What would you like to do?",
+            ["deck", "lookup", "pipeline", "quit"],
+            [
+                "Deck Manager",
+                "Card Lookup",
+                "Collection Enhancer Pipeline",
+                "Quit",
+            ],
+        )
+
+        print()
+
+        if idx == 0:
+            run_deck_manager()
+        elif idx == 1:
+            run_card_lookup()
+        elif idx == 2:
+            run_collection_pipeline()
+        elif idx == 3:
+            print("  Bye!\n")
+            sys.exit(0)
 
 
 if __name__ == "__main__":
