@@ -25,6 +25,7 @@ Planned features and improvements, roughly in priority order.
 
 ## Medium Priority
 
+- [ ] **Strength-rated role tags** — extend role tagging system to include 1-10 strength values (e.g., `reanimation: 5`, `sac_outlet: 10`). This helps the scorer understand card quality and lets explanations say "critical sac outlet" vs. "situational recursion"
 - [ ] **Duplicate detection** — warn if the same card name appears multiple times in the input
 - [ ] **Not-found suggestions** — for unmatched cards, suggest the closest Scryfall match by name (fuzzy match)
 - [ ] **Multi-JSON support** — if multiple oracle JSON files are in the folder, show a picker with file dates

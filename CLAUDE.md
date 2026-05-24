@@ -336,17 +336,34 @@ Extracts: quantity, card name, set code (if present), tags (if present), section
 
 **`analyzer.py`** — Computes: total cards, land count, nonland count, average MV, mana curve, type counts, role counts (ramp, draw, removal, board wipes, reanimation, sac outlets, token makers, protection, wincons). Returns a structured `DeckAnalysis` object.
 
-**`tags.py`** — YAML role tag system. Manual tags take priority over inferred ones. Classify cards by deck function, not just card type:
+**`tags.py`** — YAML role tag system with strength values. Manual tags take priority over inferred ones. Classify cards by deck function and rate how strong they are in that role (1-10 scale). This helps the scorer understand card quality without hard-coding formulas:
 ```yaml
 Animate Dead:
-  roles: [recursion, reanimation, graveyard_synergy]
+  roles:
+    reanimation: 5      # Brings back 1 creature, tempo-negative, but reliable
+    recursion: 7        # Can recur itself with sac outlets
+    graveyard_synergy: 6 # Fuels graveyard, but doesn't create synergy on its own
 
 Ashnod's Altar:
-  roles: [ramp, sac_outlet, combo_piece]
+  roles:
+    ramp: 8             # Converts creatures into colorless mana
+    sac_outlet: 10      # Unlimited sac outlet
+    combo_piece: 7      # Infinite mana potential with some creatures
 
 Blood Artist:
-  roles: [drain, aristocrat, payoff]
+  roles:
+    drain: 8            # Consistent damage with any creature death
+    aristocrat: 9       # Payoff that scales with sac engine
+    payoff: 8           # Needs creatures to die, but repeatable
+
+Counterspell:
+  roles:
+    removal: 9          # Instant-speed interaction
+    tempo: 10           # Blue's efficient interaction
+    cost: 10            # Mana cost 2 is excellent
 ```
+
+**Strength values inform the scorer:** A 10/10 reanimation effect (Animate Dead is 5) vs. a 10/10 sac outlet (Ashnod's Altar) get different multipliers. This lets the AI explain why Ashnod's Altar is "critical" but Animate Dead is "solid support."
 
 **`profiles.py`** — YAML deck profiles with target ranges. Example:
 ```yaml
@@ -366,17 +383,19 @@ mono_black_reanimator:
 ```
 
 **`scoring.py`** — Scores how well a card fits the deck. Formula factors:
-- Role match
-- Fills missing category
+- Role match strength (uses tags.yaml values — a 10/10 ramp card scores higher than 6/10)
+- Fills missing category (weighted by how short we are)
 - Synergy with commander
-- Synergy with existing tagged cards
+- Synergy with existing tagged cards (cross-checks tag compatibility)
 - Low MV bonus (when appropriate)
 - Collection ownership bonus
-- Supports deck profile
+- Supports deck profile (targets from profiles.yaml)
 - High MV penalty (when deck is already top-heavy)
 - Duplicate role penalty (when category is overfilled)
 - Off-strategy penalty
 - Preference penalty (see below)
+
+The strength values in tags.yaml let the scorer explain *why* Solemn Simulacrum (ramp 8) beats Wayfarer's Bauble (ramp 6) — not just that both are ramp, but *how much* ramp they provide.
 
 **User preferences — avoid:** stealing opponents' graveyards, early infinite combos, pure combo wins, excessive counterspell/control play.
 

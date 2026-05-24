@@ -16,6 +16,7 @@ import subprocess
 import textwrap
 import tty
 import termios
+import select
 from datetime import datetime
 
 # ─── Auto-install dependencies ────────────────────────────────────────────────
@@ -105,27 +106,34 @@ def ask(prompt, default=None):
     return val if val else default
 
 def ask_yn(prompt, default="y"):
+    """Prompt for yes/no. Returns True, False, or None if ESC was pressed."""
     hint = "Y/n" if default == "y" else "y/N"
-    try:
-        val = input(f"  {prompt} ({hint}): ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        print("\n\nAborted.")
-        sys.exit(0)
+    result = _read_raw_line(f"  {prompt} ({hint}): ")
+    if result is _ESCAPE:
+        return None
+    val = result.strip().lower()
     if not val:
         return default == "y"
     return val.startswith("y")
 
-def ask_choice(prompt, options, labels=None):
+def ask_choice(prompt, options, labels=None, cancellable=False):
+    """Display a numbered menu and return the 0-based index of the chosen option.
+
+    ESC always returns None. If cancellable=True, an empty line or '0' also
+    returns None. The main menu ignores None and re-prompts; pipeline steps
+    treat it as cancel.
+    """
     print(f"\n  {prompt}")
     for i, opt in enumerate(options):
         label = labels[i] if labels else opt
         print(f"    [{i+1}] {label}")
     while True:
-        try:
-            val = input("  Choice: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\n\nAborted.")
-            sys.exit(0)
+        result = _read_raw_line("  Choice: ")
+        if result is _ESCAPE:
+            return None
+        val = result.strip()
+        if cancellable and (not val or val == '0'):
+            return None
         if val.isdigit() and 1 <= int(val) <= len(options):
             return int(val) - 1
         print(f"  Please enter a number between 1 and {len(options)}.")
@@ -300,17 +308,19 @@ def parse_card_list(lines):
 
 
 def _collect_lines(prompt_extra=""):
-    """Shared input loop for card list pasting."""
+    """Shared input loop for card list pasting.
+
+    Returns a list of lines, or _ESCAPE if the user pressed ESC to cancel.
+    """
     if prompt_extra:
         print(prompt_extra)
-    print("  Type END on a new line when done.\n")
+    print("  Type END on a new line when done, or ESC to cancel.\n")
     lines = []
     while True:
-        try:
-            line = input("  > ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\n\nAborted.")
-            sys.exit(0)
+        line = _read_raw_line("  > ")
+        if line is _ESCAPE:
+            return _ESCAPE
+        line = line.strip()
         if line.upper() == "END":
             break
         lines.append(line)
@@ -322,6 +332,8 @@ def import_card_list():
     print("  Supports: plain text, Moxfield, Arena, Archidekt exports.")
     print("  Sideboard cards are captured separately. Maybeboard is skipped.")
     lines = _collect_lines()
+    if lines is _ESCAPE:
+        return [], [], None
     return parse_card_list(lines)  # returns (main, sideboard, commander_name)
 
 
@@ -330,6 +342,8 @@ def import_sideboard_list():
     print("\n  Paste cards to add to the sideboard.")
     print("  Plain names or counts work fine — no tags needed.")
     lines = _collect_lines()
+    if lines is _ESCAPE:
+        return []
     # Parse normally and merge all buckets: user may or may not use tags,
     # but the intent is sideboard so everything lands there.
     main, sideboard, _ = parse_card_list(lines)
@@ -371,7 +385,11 @@ def delete_deck(deck):
         os.remove(path)
 
 def getch():
-    """Read a single keypress without requiring Enter. Handles arrow keys."""
+    """Read a single keypress without requiring Enter. Handles arrow keys and ESC.
+
+    Uses a 50ms timeout after seeing \\x1b so a bare ESC press doesn't block
+    waiting for arrow-key bytes that may never arrive.
+    """
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     try:
@@ -380,15 +398,102 @@ def getch():
         if ch == b'\x03':
             raise KeyboardInterrupt
         if ch == b'\x1b':
-            ch2 = sys.stdin.buffer.read(1)
-            ch3 = sys.stdin.buffer.read(1)
-            if ch2 == b'[':
-                if ch3 == b'A': return 'UP'
-                if ch3 == b'B': return 'DOWN'
+            # Wait up to 50 ms for a follow-up byte (arrow-key escape sequence)
+            if select.select([sys.stdin], [], [], 0.05)[0]:
+                ch2 = sys.stdin.buffer.read(1)
+                if ch2 == b'[' and select.select([sys.stdin], [], [], 0.05)[0]:
+                    ch3 = sys.stdin.buffer.read(1)
+                    if ch3 == b'A': return 'UP'
+                    if ch3 == b'B': return 'DOWN'
+                    if ch3 == b'C': return 'RIGHT'
+                    if ch3 == b'D': return 'LEFT'
             return 'ESC'
         return ch.decode('utf-8', errors='replace')
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+# Sentinel returned by ask_escapable() when the user presses ESC.
+# Distinct from None (empty ENTER) so callers can tell the difference.
+_ESCAPE = object()
+
+
+def _read_raw_line(prompt):
+    """Core raw-mode line reader used by ask_escapable and _collect_lines.
+
+    Writes `prompt` as-is, then reads char-by-char with backspace and ESC
+    support. Returns _ESCAPE on a bare ESC press, or the raw line string
+    (possibly empty) on ENTER. Uses \\r\\n in raw mode so the cursor returns
+    to column 0 correctly.
+    """
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    buf = []
+    try:
+        tty.setraw(fd)
+        while True:
+            ch = sys.stdin.buffer.read(1)
+            if ch == b'\x03':
+                raise KeyboardInterrupt
+            if ch == b'\x1b':
+                # Consume trailing escape-sequence bytes (arrow keys, etc.)
+                if select.select([sys.stdin], [], [], 0.05)[0]:
+                    ch2 = sys.stdin.buffer.read(1)
+                    if ch2 == b'[' and select.select([sys.stdin], [], [], 0.05)[0]:
+                        sys.stdin.buffer.read(1)  # ch3 — discard
+                    continue  # ignore all escape sequences inside text input
+                # Bare ESC — cancel
+                sys.stdout.write('\r\n')
+                sys.stdout.flush()
+                return _ESCAPE
+            if ch in (b'\r', b'\n'):
+                sys.stdout.write('\r\n')
+                sys.stdout.flush()
+                return ''.join(buf)
+            if ch in (b'\x7f', b'\x08'):  # backspace / delete
+                if buf:
+                    buf.pop()
+                    sys.stdout.write('\b \b')
+                    sys.stdout.flush()
+            else:
+                try:
+                    # Reassemble multi-byte UTF-8 sequences (e.g. accented card names).
+                    # The first byte's high bits tell us how many continuation bytes follow.
+                    first = ch[0]
+                    if   first & 0xF8 == 0xF0: extra = 3   # 4-byte sequence
+                    elif first & 0xF0 == 0xE0: extra = 2   # 3-byte sequence
+                    elif first & 0xE0 == 0xC0: extra = 1   # 2-byte sequence
+                    else:                       extra = 0   # plain ASCII or stray byte
+                    for _ in range(extra):
+                        if select.select([sys.stdin], [], [], 0.02)[0]:
+                            ch += sys.stdin.buffer.read(1)
+                    c = ch.decode('utf-8')
+                    if c.isprintable():
+                        buf.append(c)
+                        sys.stdout.write(c)
+                        sys.stdout.flush()
+                except UnicodeDecodeError:
+                    pass
+    except KeyboardInterrupt:
+        # Restore terminal before any output so \n works correctly
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        sys.stdout.write('\r\n\r\nAborted.\r\n')
+        sys.stdout.flush()
+        sys.exit(0)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+def ask_escapable(prompt, default=None):
+    """Like ask(), but pressing ESC returns _ESCAPE immediately."""
+    suffix = f" [{default}]" if default else ""
+    result = _read_raw_line(f"  {prompt}{suffix}: ")
+    if result is _ESCAPE:
+        return _ESCAPE
+    val = result.strip()
+    return val if val else default
 
 def show_deck(deck, filter_query="", filter_db=None):
     """Print the current deck contents, including sideboard if present.
@@ -471,8 +576,10 @@ def validate_card_list(cards, db):
             console.print(f"\n  [yellow]?[/yellow] '{name}' not found. Did you mean:")
             for i, c in enumerate(close, 1):
                 console.print(f"      [{i}] {db[c]['name']}")
-            val = ask("Enter number to use, or ENTER to skip").strip()
-            if val.isdigit() and 1 <= int(val) <= len(close):
+            val = ask_escapable("Enter number to use, or ESC/ENTER to skip")
+            if val is _ESCAPE or not val:
+                console.print(f"  [dim]Skipped '{name}'.[/dim]")
+            elif val.isdigit() and 1 <= int(val) <= len(close):
                 correct = db[close[int(val) - 1]]
                 console.print(f"  [green]✓ Using: {correct['name']}[/green]")
                 validated.append({"name": correct["name"], "count": card["count"]})
@@ -504,8 +611,8 @@ def _check_card_list_against_db(card_list, db, db_keys, section_label):
             console.print(f"  [yellow]?[/yellow] '{card['name']}'. Did you mean:")
             for i, c in enumerate(close, 1):
                 console.print(f"      [{i}] {db[c]['name']}")
-            val = ask("Enter number to fix, or ENTER to skip").strip()
-            if val.isdigit() and 1 <= int(val) <= len(close):
+            val = ask_escapable("Enter number to fix, or ESC/ENTER to skip")
+            if val is not _ESCAPE and val and val.isdigit() and 1 <= int(val) <= len(close):
                 correct_name = db[close[int(val) - 1]]["name"]
                 for c in card_list:
                     if c["name"] == card["name"]:
@@ -706,7 +813,7 @@ def pick_deck(decks):
         print(f"    [{i}] {d['name']}  (edited {d['edited']})")
     print(f"    [{new_idx}] ── Create New Deck ──")
     print()
-    print(f"  Shortcuts:  [N] open  [N2] copy to clipboard  [N0] delete")
+    print(f"  Shortcuts:  [N] open  [N2] copy to clipboard  [N0] delete  [0] back")
 
     while True:
         try:
@@ -714,6 +821,9 @@ def pick_deck(decks):
         except (EOFError, KeyboardInterrupt):
             print("\n\nAborted.")
             sys.exit(0)
+
+        if not val or val == "0":
+            return "back", None
 
         if not val.isdigit():
             print(f"  Please enter a valid number.")
@@ -744,6 +854,9 @@ def run_deck_manager():
 
     action, deck = pick_deck(decks)
 
+    if action == "back":
+        return
+
     # Copy to clipboard
     if action == "copy":
         text = deck_to_text(deck)
@@ -766,9 +879,9 @@ def run_deck_manager():
 
     # Create new deck
     if action == "new":
-        deck_name = ask("Deck name")
-        if not deck_name:
-            print("  No name entered. Returning to menu.\n")
+        deck_name = ask_escapable("Deck name")
+        if not deck_name or deck_name is _ESCAPE:
+            print("  Returning to menu.\n")
             return
         deck = {
             "name": deck_name,
@@ -783,6 +896,9 @@ def run_deck_manager():
             ["import", "blank"],
             ["Import from card list", "Start blank"],
         )
+        if mode_idx is None:
+            print("  Returning to menu.\n")
+            return
         if mode_idx == 0:
             main_cards, sb_cards, detected_cmdr = import_card_list()
             deck["cards"]     = main_cards
@@ -804,11 +920,31 @@ def run_deck_manager():
     active_filter    = ""
     active_filter_db = None
 
-    # Deck edit loop — plain text menu
+    # Deck edit loop — single-key menu (no ENTER needed)
     while True:
         show_deck(deck, filter_query=active_filter, filter_db=active_filter_db)
-        console.print("  [bold cyan]A[/bold cyan] Add   [bold cyan]B[/bold cyan] +Sideboard   [bold red]D[/bold red] Delete   [bold yellow]M[/bold yellow] Commander   [bold blue]F[/bold blue] Filter   [dim]C[/dim] Check   [dim]T[/dim] Stats   [bold green]W[/bold green] Save   [dim]Q[/dim] Quit")
-        choice = (ask("Action") or "").strip().upper()
+        console.print(
+            "  [bold cyan]A[/bold cyan] Add   "
+            "[bold cyan]B[/bold cyan] +Sideboard   "
+            "[bold red]D[/bold red] Delete   "
+            "[bold yellow]M[/bold yellow] Commander   "
+            "[bold blue]F[/bold blue] Filter   "
+            "[dim]C[/dim] Check   "
+            "[dim]T[/dim] Stats   "
+            "[bold green]W[/bold green] Save   "
+            "[dim]ESC[/dim] Save+Exit"
+        )
+        sys.stdout.write("  Choice: ")
+        sys.stdout.flush()
+        key = getch()
+        choice = key if key in ('ESC', 'UP', 'DOWN', 'LEFT', 'RIGHT') else key.upper()
+        # Echo the key on the same line so it reads "Choice: D"
+        if key == 'ESC':
+            print("ESC")
+        elif len(key) == 1 and key.isprintable():
+            print(key.upper())
+        else:
+            print()
 
         if choice == 'B':
             sb_new = import_sideboard_list()
@@ -842,9 +978,10 @@ def run_deck_manager():
             if not main_sorted and not sb_sorted:
                 console.print("  No cards to delete.")
                 continue
-            val = (ask("Remove (number, S# for sideboard, or name fragment)") or "").strip()
-            if not val:
+            val = ask_escapable("Remove (number, S# for sideboard, or name fragment)")
+            if val is _ESCAPE or not val:
                 continue
+            val = val.strip()
 
             val_upper = val.upper()
 
@@ -893,7 +1030,10 @@ def run_deck_manager():
                     for n, (section, slot, card) in enumerate(all_hits, 1):
                         loc = f"main #{slot}" if section == "main" else f"sideboard S{slot}"
                         console.print(f"    [{n}] {card['name']}  [dim]({loc})[/dim]")
-                    pick = (ask("Enter number to remove, or ENTER to cancel") or "").strip()
+                    pick = ask_escapable("Enter number to remove, or ESC/ENTER to cancel")
+                    if pick is _ESCAPE or not pick:
+                        continue
+                    pick = pick.strip()
                     if pick.isdigit() and 1 <= int(pick) <= len(all_hits):
                         section, _, card = all_hits[int(pick) - 1]
                         if section == "main":
@@ -910,8 +1050,11 @@ def run_deck_manager():
             current = deck.get("commander")
             if current:
                 console.print(f"\n  Current commander: [bold yellow]{current}[/bold yellow]")
-            console.print("  [dim]Enter a card number, part of a name, or ENTER to clear.[/dim]")
-            val = (ask("Set commander") or "").strip()
+            console.print("  [dim]Enter a card number, part of a name, ENTER to clear, or ESC to cancel.[/dim]")
+            val = ask_escapable("Set commander")
+            if val is _ESCAPE:
+                continue
+            val = (val or "").strip()
             if not val:
                 deck["commander"] = None
                 console.print("  [dim]Commander cleared.[/dim]")
@@ -933,7 +1076,10 @@ def run_deck_manager():
         elif choice == 'F':
             console.print("  [dim]Filter fields: type: text: cmc: color: keyword: — or just a name fragment[/dim]")
             console.print("  [dim]Examples:  type:creature   cmc:>=4   color:b   text:draw   keyword:flying[/dim]")
-            q = (ask("Filter query (ENTER to clear)") or "").strip()
+            q = ask_escapable("Filter query (ENTER to clear, ESC to keep current)")
+            if q is _ESCAPE:
+                continue  # leave active_filter unchanged
+            q = (q or "").strip()
             if q:
                 active_filter    = q
                 active_filter_db = get_scryfall_db()
@@ -949,14 +1095,16 @@ def run_deck_manager():
             db = get_scryfall_db()
             console.clear()
             show_deck_stats(deck, db)
-            ask("Press ENTER to return")
+            ask_escapable("Press ENTER or ESC to return")
 
         elif choice == 'W':
             path = save_deck(deck)
             console.print(f"\n  [green]✓ Saved: {os.path.basename(path)}[/green]\n")
-            break
 
-        elif choice == 'Q':
+        elif choice == 'ESC':
+            if ask_yn("Save before exiting?", default="y"):
+                path = save_deck(deck)
+                console.print(f"\n  [green]✓ Saved: {os.path.basename(path)}[/green]\n")
             break
 
 # ─── Card Lookup ──────────────────────────────────────────────────────────────
@@ -1052,8 +1200,8 @@ def run_card_lookup():
     db = get_scryfall_db()
 
     while True:
-        name = ask("Card name (or press ENTER to go back)")
-        if not name:
+        name = ask_escapable("Card name (ESC or ENTER to go back)")
+        if name is _ESCAPE or not name:
             break
 
         card = db.get(name.lower())
@@ -1068,8 +1216,10 @@ def run_card_lookup():
                 print(f"\n  '{name}' not found. Did you mean:")
                 for i, c in enumerate(close):
                     print(f"    [{i+1}] {db[c]['name']}")
-                val = ask("Enter number to select, or ENTER to skip")
-                if val and val.isdigit() and 1 <= int(val) <= len(close):
+                val = ask_escapable("Enter number to select, or ESC/ENTER to skip")
+                if val is _ESCAPE or not val:
+                    continue
+                if val.isdigit() and 1 <= int(val) <= len(close):
                     card = db[close[int(val) - 1]]
             else:
                 print(f"  No match found for '{name}'.\n")
@@ -1097,8 +1247,10 @@ def pick_card_list():
 
     if not files:
         print(f"\n  No .csv or .xlsx files found in {DOWNLOADS}.")
-        path = ask("Enter full path to your card list")
-        if not path or not os.path.exists(path):
+        path = ask_escapable("Enter full path to your card list")
+        if path is _ESCAPE or not path:
+            return None
+        if not os.path.exists(path):
             print("  File not found. Returning to menu.")
             return None
         return path
@@ -1106,13 +1258,20 @@ def pick_card_list():
     if len(files) == 1:
         f = files[0]
         print(f"\n  Found: {os.path.basename(f)}")
-        if ask_yn("Use this file?"):
+        confirm = ask_yn("Use this file?")
+        if confirm is None:   # ESC
+            return None
+        if confirm:
             return f
-        path = ask("Enter full path to your card list")
+        path = ask_escapable("Enter full path to your card list (ESC to cancel)")
+        if path is _ESCAPE:
+            return None
         return path
 
     labels = [f"{os.path.basename(f)}  ({_mod_date(f)})" for f in files[:10]]
-    idx = ask_choice("Multiple files found in Downloads — which one?", files[:10], labels)
+    idx = ask_choice("Multiple files found in Downloads — which one?", files[:10], labels, cancellable=True)
+    if idx is None:
+        return None
     return files[idx]
 
 def _mod_date(path):
@@ -1140,15 +1299,20 @@ def preview_and_pick_column(df):
         print("  " + "  ".join(str(row[c])[:w].ljust(w) for c, w in zip(preview_cols, col_widths)))
 
     print(f"\n  Detected name column: '{auto}'")
-    if ask_yn("Is this correct?"):
+    confirm = ask_yn("Is this correct?")
+    if confirm is None:   # ESC
+        return None
+    if confirm:
         return auto
 
     print("\n  All columns:")
     for i, col in enumerate(df.columns):
         print(f"    [{i+1}] {col}")
     while True:
-        val = ask("Enter column number or name")
-        if val and val.isdigit() and 1 <= int(val) <= len(df.columns):
+        val = ask_escapable("Enter column number or name (ESC to cancel)")
+        if val is _ESCAPE or not val:
+            return None
+        if val.isdigit() and 1 <= int(val) <= len(df.columns):
             return df.columns[int(val) - 1]
         if val in df.columns:
             return val
@@ -1176,7 +1340,10 @@ def find_scryfall_json():
 
     # Multiple files — ask which one to use
     labels = [f"{os.path.basename(f)}  ({os.path.getsize(f)//1024//1024} MB)" for f in files]
-    idx = ask_choice("Multiple Scryfall JSON files found — which one?", files, labels)
+    idx = ask_choice("Multiple Scryfall JSON files found — which one?", files, labels, cancellable=True)
+    if idx is None:
+        console.print("  [dim]Cancelled.[/dim]")
+        sys.exit(0)
     return files[idx]
 
 def load_scryfall_db(json_path):
@@ -1199,8 +1366,11 @@ def pick_export_mode():
         [
             "Deckbuilding  — clean, focused columns (CMC, type, oracle text, legalities)",
             "Full Scryfall — all available fields (set, rarity, prices, URIs, etc.)",
-        ]
+        ],
+        cancellable=True,
     )
+    if idx is None:
+        return None
     return ["deckbuilding", "full"][idx]
 
 def pick_output_name(input_path, mode):
@@ -1209,7 +1379,10 @@ def pick_output_name(input_path, mode):
     date_stamp = datetime.now().strftime("%Y%m%d")
     print(f"\n  Output will be saved to: {DOWNLOADS}")
     print(f"  Date stamp '{date_stamp}' will be appended automatically.")
-    stem = ask("Name your output file (no extension)", default=default_stem)
+    stem = ask_escapable("Name your output file (no extension, ESC to cancel)", default=default_stem)
+    if stem is _ESCAPE:
+        return None
+    stem = stem or default_stem
     filename = f"{stem}_{mode}_{date_stamp}.xlsx"
     full_path = os.path.join(DOWNLOADS, filename)
     print(f"\n  Will save as: {filename}")
@@ -1398,7 +1571,10 @@ def pipeline_interactive_fixes(not_found_names, db, db_keys):
         console.print(f"\n  [yellow]?[/yellow]  '{name}'. Did you mean:")
         for i, c in enumerate(close, 1):
             console.print(f"      [{i}] {db[c]['name']}")
-        val = (ask("Enter number to use, or ENTER to skip") or "").strip()
+        val = ask_escapable("Enter number to use, or ESC/ENTER to skip")
+        if val is _ESCAPE or not val:
+            console.print(f"  [dim]  Skipped.[/dim]")
+            continue
         if val.isdigit() and 1 <= int(val) <= len(close):
             card = db[close[int(val) - 1]]
             console.print(f"  [green]✓  Using: {card['name']}[/green]")
@@ -1423,15 +1599,26 @@ def apply_pipeline_corrections(df, name_col, results, corrections):
 def run_collection_pipeline():
     card_list_path = pick_card_list()
     if not card_list_path:
+        console.print("  [dim]Pipeline cancelled.[/dim]")
         return
 
     df = load_spreadsheet(card_list_path)
     name_col = preview_and_pick_column(df)
+    if name_col is None:
+        console.print("  [dim]Pipeline cancelled.[/dim]")
+        return
     print(f"\n  Name column: '{name_col}'  ({len(df)} cards total)")
 
     db = get_scryfall_db()
     mode = pick_export_mode()
+    if mode is None:
+        console.print("  [dim]Pipeline cancelled.[/dim]")
+        return
+
     output_path = pick_output_name(card_list_path, mode)
+    if output_path is None:
+        console.print("  [dim]Pipeline cancelled.[/dim]")
+        return
 
     print()
     divider()
@@ -1441,8 +1628,9 @@ def run_collection_pipeline():
     print(f"  Output: {os.path.basename(output_path)}")
     divider()
     print()
-    if not ask_yn("Start the pipeline?"):
-        print("  Cancelled.")
+    yn = ask_yn("Start the pipeline?")
+    if yn is None or not yn:
+        console.print("  [dim]Pipeline cancelled.[/dim]")
         return
 
     results, not_found_names, blank_rows, fuzzy_matches = run_pipeline(df, name_col, db)
