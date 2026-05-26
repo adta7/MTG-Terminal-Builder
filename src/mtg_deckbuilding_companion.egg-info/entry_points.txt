@@ -1,0 +1,2 @@
+[console_scripts]
+mtgdeck = mtgdeck.__main__:main

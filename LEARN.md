@@ -503,3 +503,69 @@ Interactive functions (anything using `input()`, `getch()`, `tty.setraw()`) can'
 - The terminal width is not fixed. Always read it at render time, not at startup.
 - `pbcopy` only works on Mac. If you ever share this across platforms, you'll need to detect the OS.
 - `difflib.get_close_matches` is surprisingly good for card name typos and handles things like "Lighthing Bolt" → "Lightning Bolt" correctly.
+
+---
+
+## 2026-05-26
+
+### Phase 0: Modular Architecture Complete
+
+Built a modular architecture by extracting business logic into separate modules (models, database, parser, rules, scryfall).
+
+**Why this matters:** Single 1689-line mtg.py is hard to extend. Separate modules let us add features (phases 1-5) without touching existing code.
+
+**What was built:**
+- `src/mtgdeck/` — 7 core modules with typed dataclasses
+- SQLite persistence layer (replaces lazy-loaded 165MB JSON)
+- Parser moved from mtg.py (no logic changes)
+- Rules engine for Commander validation
+- 5 tests, all passing
+
+**Backward compatibility:** mtg.py still works unchanged. Users don't see a difference except the app is faster.
+
+### Scryfall Download Issue
+
+Attempted automatic download from Scryfall but the URL failed (404).
+
+**Problem:** The direct URL `https://data.scryfall.io/oracle-cards/oracle-cards.json` returns 404.
+
+**Current solution:** Manual download from https://scryfall.com/docs/api/bulk-data (select "Default Cards" JSON).
+
+**Must-fix:** Implement automatic download before Phase 1. This is a UX requirement — users should not need manual steps.
+
+**Why it matters:** `pip install -e .` was also a missing step. The more manual steps, the worse the experience. Setup should be: run one command, wait 1-2 minutes, done.
+
+### Design Pattern: Parallel Architecture
+
+Instead of refactoring mtg.py (risky, breaks things), we built a parallel structure:
+- Keep mtg.py as-is
+- Build new modules in src/mtgdeck/
+- New features extend the modules, not mtg.py
+- Phases 1-5 gradually deprecate mtg.py (no rush)
+
+This is like building scaffolding around a building while it's operating. Safe, reversible, allows gradual migration.
+
+### Dataclasses Over Dicts
+
+Using `@dataclass` instead of dicts:
+```python
+# Old way (error-prone)
+card = {"name": "...", "cmc": 3}
+if card.get("cmc"):  # Typo? Dict doesn't complain
+
+# New way (type-safe)
+card = Card(name="...", cmc=3)
+card.cmc  # IDE knows this exists, catches typos
+```
+
+Dataclasses enable IDE autocomplete, type checking, and catch bugs early.
+
+### Python Package Installation
+
+`pip install -e .` (editable mode) with pyproject.toml is the modern Python way:
+- Tells pip where your package is
+- Creates symlink to source (changes reflect immediately)
+- `python -m mtgdeck` works because Python knows where to find mtgdeck
+- Also enables `python -m pytest` without cd'ing
+
+Should have done this from the start.

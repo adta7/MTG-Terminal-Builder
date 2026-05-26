@@ -1,0 +1,17 @@
+README.md
+pyproject.toml
+src/mtg_deckbuilding_companion.egg-info/PKG-INFO
+src/mtg_deckbuilding_companion.egg-info/SOURCES.txt
+src/mtg_deckbuilding_companion.egg-info/dependency_links.txt
+src/mtg_deckbuilding_companion.egg-info/entry_points.txt
+src/mtg_deckbuilding_companion.egg-info/requires.txt
+src/mtg_deckbuilding_companion.egg-info/top_level.txt
+src/mtgdeck/__init__.py
+src/mtgdeck/__main__.py
+src/mtgdeck/database.py
+src/mtgdeck/models.py
+src/mtgdeck/parser.py
+src/mtgdeck/rules.py
+src/mtgdeck/scryfall.py
+tests/test_database.py
+tests/test_parser.py

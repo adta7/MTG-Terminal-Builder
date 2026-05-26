@@ -64,7 +64,7 @@ def download_scryfall_bulk(output_path: str = "oracle-cards-latest.json") -> str
     Raises:
         urllib.error.URLError: If download fails
     """
-    url = "https://data.scryfall.io/oracle-cards/oracle-cards.json"
+    url = "https://data.scryfall.io/default-cards/default-cards.json"
     print(f"\n  Downloading Scryfall data (~165MB)...")
     print(f"  This may take a minute...\n")
 
@@ -73,7 +73,10 @@ def download_scryfall_bulk(output_path: str = "oracle-cards-latest.json") -> str
         print(f"\n  ✓ Downloaded to {output_path}\n")
         return output_path
     except Exception as e:
-        print(f"\n  ✗ Download failed: {e}\n")
+        print(f"\n  ✗ Download failed: {e}")
+        print(f"\n  Alternative: Download manually from:")
+        print(f"    https://scryfall.com/docs/api/bulk-data")
+        print(f"  Then place the JSON file in this directory.\n")
         raise
 
 

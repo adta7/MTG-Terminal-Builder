@@ -49,7 +49,7 @@ def main():
 def setup():
     """Initialize the database by downloading and indexing Scryfall data."""
     print("\n  MTG Deckbuilding Companion — Setup\n")
-    print("  This will download the latest Scryfall card data and build the database.")
+    print("  This will build a database from Scryfall card data.")
     print("  It's a one-time operation (~1-2 minutes).\n")
 
     try:
@@ -61,8 +61,12 @@ def setup():
             json_path = find_scryfall_json(str(json_dir))
             print(f"  Found Scryfall JSON: {json_path}\n")
         except FileNotFoundError:
-            print("  No local Scryfall JSON found. Downloading...\n")
-            json_path = download_scryfall_bulk(str(json_dir / "oracle-cards-latest.json"))
+            print("  No local Scryfall JSON found.\n")
+            print("  Download from: https://scryfall.com/docs/api/bulk-data")
+            print("  (Look for 'Default Cards' and download the .json file)\n")
+            print("  Then place it in this directory and run:")
+            print("    python -m mtgdeck setup\n")
+            sys.exit(1)
 
         # Initialize database and index cards
         db_path = get_db_path()
