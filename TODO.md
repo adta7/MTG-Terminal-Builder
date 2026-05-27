@@ -4,6 +4,121 @@ Planned features and improvements, roughly in priority order.
 
 ---
 
+## Tagging System — Workflow Improvements
+
+These three tools make the tagging system easier to grow over time.
+Build them in order — each one builds on the previous.
+
+---
+
+### 1. Oracle Scanner — Discover new pattern candidates
+
+**Problem:** We have 35+ mechanical patterns but only tagged 75 deck cards by hand.
+We don't know what we're missing across the full 36k-card oracle base — or even just black cards.
+
+**What it does:**
+- Query all black (or black/colorless) cards from `cards.sqlite`
+- Run every card through `tag_mechanical()` against an in-memory DB
+- Collect cards with zero mechanical tags → these are the gaps
+- Group untagged cards by oracle text patterns (keyword frequency, repeated phrases)
+- Print a report: top 20 unmatched cards + top 10 repeated phrases not covered by any current pattern
+
+**Why start with black:**
+Your deck is mono-black. Scanning all 36k cards at once would produce noise from blue counterspells, red burn, green ramp, etc. Scanning only black surfaces the gaps you actually care about first.
+
+**CLI command idea:**
+```bash
+python -m mtgdeck scan-oracle --color b --min-cmc 0 --untagged-only
+```
+
+**Output example:**
+```
+Cards with zero mechanical tags (black, showing top 20):
+  Nightmare Shepherd   — "If a nontoken creature you control would die..."
+  Archghoul of Thraben — "Whenever Archghoul or another Zombie dies..."
+  ...
+
+Repeated phrases not covered by any pattern (top 10):
+  "put a +1/+1 counter on"   — appears in 47 untagged black cards
+  "venture into the dungeon"  — appears in 12 untagged black cards
+  ...
+```
+
+**Files to create:**
+- `src/mtgdeck/scanner.py` — oracle scanning and phrase clustering
+- `tests/test_scanner.py` — verify scan returns results, no crashes on empty DB
+- Add `scan-oracle` subcommand to `src/mtgdeck/__main__.py`
+
+---
+
+### 2. New Card Onboarding — Interactive check when adding an untagged card
+
+**Problem:** When you import a new deck or add a card mid-session, the card goes in with zero
+tags unless you manually run the tagger. There's no prompt or signal that tags are missing.
+
+**What it does:**
+- After deck import, compare all card names against `card_tags` table
+- For cards with zero mechanical tags OR zero functional tags, surface them one at a time
+- Show: card name, oracle text, what tags fired automatically
+- Ask: "Does this look right? (y) Accept / (a) Add manual tag / (s) Skip"
+- If user adds a tag: show the available tags by layer, let them pick one, write to DB with `source="manual"` and `confidence=1.0`
+- At end: summarize how many were auto-tagged, how many needed manual intervention
+
+**Key constraint:** Do not block the import flow. This should be optional — run it after
+a successful import with `--onboard` flag, or as its own `mtgdeck onboard <deck>` command.
+
+**CLI command idea:**
+```bash
+python -m mtgdeck onboard sheoldred           # check existing deck
+python -m mtgdeck import deck.txt --onboard   # check immediately after import
+```
+
+**Files to create / modify:**
+- `src/mtgdeck/onboard.py` — the interactive onboarding loop
+- Modify `src/mtgdeck/__main__.py` — add `onboard` subcommand and `--onboard` flag on import
+
+---
+
+### 3. New Tag Wizard — Guided flow for adding a new tag across all layers
+
+**Problem:** Adding a new mechanical tag requires touching 4 separate places:
+1. TAGS registry (name, layer, description)
+2. `_MECHANICAL_PATTERNS` (1+ regex patterns with confidence values)
+3. `FUNCTIONAL_RULES` (which functional tags should derive from this new tag?)
+4. Tests (positive match, negative match)
+
+...then re-running the tagger on all existing cards to pick up the new pattern.
+
+**What it does:**
+- `python -m mtgdeck tag new` launches an interactive wizard
+- Asks: tag name → layer → description
+- Asks: "Enter a regex pattern for this tag (leave blank to skip)"
+  - Tests the pattern live against a sample of oracle texts from the DB
+  - Shows matches: "This pattern matches 47 cards — show them? (y/n)"
+  - Asks for confidence value
+  - Repeats until user is satisfied or opts out
+- Asks: "Which functional tags should derive from this mechanical tag?" (shows list)
+  - For each selected functional tag: enter confidence (or use default 0.75)
+  - Adds rules to `FUNCTIONAL_RULES`
+- Writes updated TAGS entry and patterns to `tags.py` — or prints the code to paste in manually
+- Automatically re-tags all existing DB cards with the new pattern
+- Automatically re-runs `tag_functional_from_rules` on affected cards
+
+**Two output modes:**
+- `--dry-run` — prints the code to add, doesn't touch any files (safe to inspect first)
+- `--apply` — writes directly to `tags.py` and re-tags the DB
+
+**Note on auto-editing `tags.py`:**
+Auto-editing Python source is fragile. The dry-run mode (print the snippet, paste it in yourself)
+is the right default. Only invest in `--apply` mode if you're adding tags frequently enough
+to make manual copy-paste annoying.
+
+**Files to create:**
+- `src/mtgdeck/tag_wizard.py` — interactive wizard logic
+- Add `tag new` subcommand to `src/mtgdeck/__main__.py`
+
+---
+
 ## High Priority
 
 - [ ] **`mtg.py` — build the unified interactive script**
