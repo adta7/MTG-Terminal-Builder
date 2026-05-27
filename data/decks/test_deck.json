@@ -1,0 +1,19 @@
+{
+  "name": "Test Deck",
+  "commander": "Sheoldred, Whispering One",
+  "created": "2026-05-26",
+  "edited": "2026-05-26",
+  "cards": [
+    {"name": "Sheoldred, Whispering One", "count": 1},
+    {"name": "Island", "count": 20},
+    {"name": "Swamp", "count": 15},
+    {"name": "Lightning Bolt", "count": 4},
+    {"name": "Counterspell", "count": 3},
+    {"name": "Plains", "count": 10},
+    {"name": "Forest", "count": 10},
+    {"name": "Mountain", "count": 12},
+    {"name": "Cancel", "count": 7},
+    {"name": "Unsummon", "count": 3}
+  ],
+  "sideboard": []
+}

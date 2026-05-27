@@ -17,6 +17,10 @@ from mtgdeck.scryfall import (
     download_scryfall_bulk,
     index_cards_into_db,
 )
+from mtgdeck.analyzer import analyze_deck
+from rich.console import Console
+
+console = Console()
 
 
 def get_db_path() -> str:
@@ -39,6 +43,15 @@ def main():
         print(f"    python -m mtgdeck setup\n")
         print("  to initialize the database.\n")
         sys.exit(1)
+
+    # Phase 1: Handle 'analyze' command
+    if len(sys.argv) > 1 and sys.argv[1] == "analyze":
+        if len(sys.argv) < 3:
+            print("\n  Usage: python -m mtgdeck analyze <deck_name>\n")
+            sys.exit(1)
+        deck_name = sys.argv[2]
+        run_analyzer(db_path, deck_name)
+        return
 
     # Load the old mtg.py for now (until we fully refactor the UI)
     print("  Loading application...\n")
@@ -83,6 +96,90 @@ def setup():
     except Exception as e:
         print(f"\n  ✗ Setup failed: {e}\n")
         sys.exit(1)
+
+
+def run_analyzer(db_path: str, deck_name: str):
+    """Phase 1: Analyze a deck."""
+    import json
+    import glob
+    from mtgdeck.models import Deck, DeckCard
+
+    # Find the deck file
+    # db_path is data/cards.sqlite, so decks_dir is data/decks/
+    decks_dir = Path(db_path).parent / "decks"
+    deck_files = glob.glob(str(decks_dir / "*.json"))
+
+    deck_file = None
+    for f in deck_files:
+        with open(f) as fh:
+            data = json.load(fh)
+        if data.get("name", "").lower() == deck_name.lower():
+            deck_file = f
+            break
+
+    if not deck_file:
+        console.print(f"\n  ✗ Deck '{deck_name}' not found\n")
+        sys.exit(1)
+
+    # Load deck
+    with open(deck_file) as fh:
+        data = json.load(fh)
+
+    cards = [DeckCard(name=c["name"], count=c["count"]) for c in data.get("cards", [])]
+    sideboard = [DeckCard(name=c["name"], count=c["count"]) for c in data.get("sideboard", [])]
+
+    deck = Deck(
+        name=data["name"],
+        cards=cards,
+        sideboard=sideboard,
+        commander=data.get("commander"),
+        created=data.get("created", ""),
+        edited=data.get("edited", ""),
+    )
+
+    # Analyze
+    db = Database(db_path)
+    db.connect()
+
+    analysis = analyze_deck(deck, db)
+    db.close()
+
+    # Print results
+    console.print()
+    console.print(f"[bold cyan]{analysis.deck_name}[/bold cyan]")
+    if deck.commander:
+        console.print(f"[dim]Commander: {deck.commander}[/dim]")
+
+    console.print()
+    console.print(f"Cards: {analysis.total_cards}/100")
+    console.print(f"Lands: {analysis.land_count} | Nonlands: {analysis.nonland_count}")
+    console.print(f"Avg Mana Value: {analysis.avg_mana_value:.2f}")
+    console.print(f"Color Identity: {', '.join(analysis.color_identity) or 'None'}")
+
+    # Mana curve
+    console.print()
+    console.print("[bold]Mana Curve:[/bold]")
+    for cmc in range(8):
+        count = analysis.mana_curve.get(cmc, 0)
+        bar = "█" * min(count, 30)
+        console.print(f"  {cmc}: {count:2d} {bar}")
+
+    # Type breakdown
+    if analysis.type_counts:
+        console.print()
+        console.print("[bold]Type Breakdown:[/bold]")
+        for type_name in sorted(analysis.type_counts.keys()):
+            count = analysis.type_counts[type_name]
+            console.print(f"  {type_name}: {count}")
+
+    # Warnings
+    if analysis.warnings:
+        console.print()
+        console.print("[bold yellow]Warnings:[/bold yellow]")
+        for warning in analysis.warnings:
+            console.print(f"  ⚠ {warning}")
+
+    console.print()
 
 
 if __name__ == "__main__":
