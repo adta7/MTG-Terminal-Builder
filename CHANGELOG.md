@@ -5,6 +5,14 @@ Format: [Version] — Date — Description
 
 ---
 
+## [2.6.1] — 2026-05-26
+
+### Fixed
+- `mtg.py` — `_build_card_lines()`: DFC cards (e.g. "Stensian Sanguinist // Exsanguinate") now render each face name + mana cost on its own title row instead of cramming both onto one overflowing line
+- `mtg.py` — `run_card_lookup()`: DFC front-face search now works when the user types only the front face name (e.g. "malakir rebirth" now finds "Malakir Rebirth // Malakir Mire"); the previous fallback only triggered when the user manually typed `//`
+
+---
+
 ## [2.6.0] — 2026-05-26
 
 ### Added

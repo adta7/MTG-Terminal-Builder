@@ -1226,9 +1226,18 @@ def _build_card_lines(card) -> list[str]:
     lines.append(f"┌{'─' * INNER}┐")
 
     # Name (left) + mana cost (right)
-    mana_part = f"{mana} " if mana else " "
-    name_w    = INNER - len(mana_part) - 1
-    lines.append(row(f" {name[:name_w]:<{name_w}}{mana_part}"))
+    # DFC: render one row per face so long combined names don't overflow.
+    if "card_faces" in card:
+        for face in card["card_faces"]:
+            face_name = face.get("name", "")
+            face_mana = face.get("mana_cost", "")
+            face_mana_part = f"{face_mana} " if face_mana else " "
+            face_name_w = INNER - len(face_mana_part) - 1
+            lines.append(row(f" {face_name[:face_name_w]:<{face_name_w}}{face_mana_part}"))
+    else:
+        mana_part = f"{mana} " if mana else " "
+        name_w    = INNER - len(mana_part) - 1
+        lines.append(row(f" {name[:name_w]:<{name_w}}{mana_part}"))
 
     # Image box
     img_inner = INNER - 4
@@ -1336,9 +1345,13 @@ def run_card_lookup():
 
         card = db.get(name.lower())
 
-        if card is None and "//" in name:
-            front = name.split("//")[0].strip()
-            card = db.get(front.lower())
+        if card is None:
+            # DFC fallback: "malakir rebirth" → "malakir rebirth // malakir mire"
+            # Works whether or not the user typed the "//" separator.
+            front = name.lower().split("//")[0].strip()
+            dfc_key = next((k for k in db if k.startswith(front + " //")), None)
+            if dfc_key:
+                card = db[dfc_key]
 
         if card is None:
             close = difflib.get_close_matches(name.lower(), list(db.keys()), n=3, cutoff=0.6)
