@@ -1250,9 +1250,9 @@ def _build_card_lines(card) -> list[str]:
             if para.strip():
                 for wrapped in textwrap.wrap(para, width=TEXT_W):
                     lines.append(text_row(wrapped))
-            else:
-                lines.append(text_row())
-    lines.append(text_row())
+                lines.append(text_row())  # blank line after each ability
+    else:
+        lines.append(text_row())  # padding when card has no oracle text
 
     # Bottom bar: rarity • set (left) and P/T or loyalty (right)
     lines.append(mid_divider())
