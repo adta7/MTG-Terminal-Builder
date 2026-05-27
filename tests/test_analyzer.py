@@ -17,7 +17,7 @@ def test_matches_cmc():
     assert _matches_cmc(3, ">=3") == True
     assert _matches_cmc(3, ">=4") == False
     assert _matches_cmc(3, "<4") == True
-    assert _matches_cmc(0, "colorless") == True
+    assert _matches_cmc(0, "0") == True   # Fixed: "colorless" is not a CMC condition
 
 
 def test_matches_color():

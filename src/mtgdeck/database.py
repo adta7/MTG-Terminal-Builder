@@ -107,15 +107,62 @@ class Database:
             )
         """)
 
-        # Card tags: role classification (phase 2)
+        # Tags: tag definitions by layer (phase 2)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                layer TEXT NOT NULL,
+                description TEXT
+            )
+        """)
+
+        # Migrate card_tags from old flat schema if it exists
+        cur.execute("PRAGMA table_info(card_tags)")
+        old_columns = {row[1] for row in cur.fetchall()}
+        if "role" in old_columns or "strength" in old_columns:
+            cur.execute("DROP TABLE card_tags")
+
+        # Card tags: card-to-tag relationships with confidence (phase 2)
+        # confidence: 0.0-1.0 scale
+        #   1.0 = mechanically certain (oracle text is explicit)
+        #   0.7 = confident (well-known role)
+        #   0.4 = contextual (depends on deck)
+        #   0.1 = speculative
+        #
+        # NOTE: card_id is intentionally NOT a FK to cards(name).
+        # Tags are metadata about a card by name and should work even
+        # for cards not yet indexed from Scryfall. tag_id IS enforced
+        # so every tag must exist in the registry before use.
         cur.execute("""
             CREATE TABLE IF NOT EXISTS card_tags (
-                id INTEGER PRIMARY KEY,
-                card_name TEXT NOT NULL,
-                role TEXT NOT NULL,
-                strength INTEGER,
-                UNIQUE(card_name, role),
-                FOREIGN KEY(card_name) REFERENCES cards(name)
+                card_id TEXT NOT NULL,
+                tag_id INTEGER NOT NULL,
+                confidence REAL DEFAULT 1.0,
+                source TEXT DEFAULT 'manual',
+                note TEXT,
+                PRIMARY KEY (card_id, tag_id),
+                FOREIGN KEY(tag_id) REFERENCES tags(id)
+            )
+        """)
+
+        # Synergy edges: relationships between cards (phase 2)
+        # strength: 0.0-1.0 scale
+        #   1.0 = core synergy (the combo itself)
+        #   0.7 = strong synergy
+        #   0.5 = moderate
+        #   0.3 = incidental
+        #
+        # NOTE: card_a/card_b are NOT FK to cards(name) — synergy data
+        # can be seeded independently of Scryfall indexing.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS synergy_edges (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                card_a TEXT NOT NULL,
+                card_b TEXT NOT NULL,
+                synergy_type TEXT NOT NULL,
+                strength REAL DEFAULT 0.5,
+                explanation TEXT
             )
         """)
 
@@ -333,37 +380,269 @@ class Database:
 
     # ─── Tag operations (phase 2) ─────────────────────────────────────────────
 
-    def save_card_tag(self, card_name: str, role: str, strength: int):
-        """Save a role tag for a card."""
+    def save_tag(self, name: str, layer: str, description: str = "") -> int:
+        """
+        Create a tag in the tags table. Safe to call multiple times — uses INSERT OR IGNORE.
+
+        Args:
+            name: tag name, e.g. 'Mana_Multiplier'
+            layer: 'mechanical' | 'functional' | 'archetype' | 'emotional'
+            description: human-readable explanation of the tag
+
+        Returns:
+            tag id
+        """
+        cur = self.conn.cursor()
+        cur.execute(
+            "INSERT OR IGNORE INTO tags (name, layer, description) VALUES (?, ?, ?)",
+            (name, layer, description),
+        )
+        self.conn.commit()
+        cur.execute("SELECT id FROM tags WHERE name = ?", (name,))
+        return cur.fetchone()[0]
+
+    def get_tag_id(self, tag_name: str) -> Optional[int]:
+        """Look up a tag's id by name (case-insensitive). Returns None if not found."""
+        cur = self.conn.cursor()
+        cur.execute("SELECT id FROM tags WHERE LOWER(name) = LOWER(?)", (tag_name,))
+        row = cur.fetchone()
+        return row[0] if row else None
+
+    def tag_card(
+        self,
+        card_name: str,
+        tag_name: str,
+        confidence: float = 1.0,
+        source: str = "manual",
+        note: str = "",
+    ) -> bool:
+        """
+        Tag a card. Returns True if successful, False if tag not found.
+
+        Confidence scale (0.0–1.0):
+            1.0 = mechanically certain (oracle text is explicit)
+            0.7 = confident (well-known role, clear pattern)
+            0.4 = contextual (depends on the deck)
+            0.1 = speculative
+        """
+        tag_id = self.get_tag_id(tag_name)
+        if tag_id is None:
+            return False
         cur = self.conn.cursor()
         cur.execute(
             """
-            INSERT OR REPLACE INTO card_tags (card_name, role, strength)
-            VALUES (?, ?, ?)
+            INSERT OR REPLACE INTO card_tags (card_id, tag_id, confidence, source, note)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (card_name, role, strength),
+            (card_name, tag_id, confidence, source, note or ""),
         )
         self.conn.commit()
+        return True
 
-    def get_card_tags(self, card_name: str) -> dict[str, int]:
-        """Get all roles for a card. Returns {role: strength}."""
+    def get_card_tags(self, card_name: str, layer: Optional[str] = None) -> List[dict]:
+        """
+        Get all tags for a card, optionally filtered by layer.
+
+        Returns:
+            List of dicts: {name, layer, confidence, source, note}
+        """
+        cur = self.conn.cursor()
+        if layer:
+            cur.execute(
+                """
+                SELECT t.name, t.layer, ct.confidence, ct.source, ct.note
+                FROM card_tags ct
+                JOIN tags t ON ct.tag_id = t.id
+                WHERE LOWER(ct.card_id) = LOWER(?)
+                  AND LOWER(t.layer) = LOWER(?)
+                ORDER BY ct.confidence DESC
+                """,
+                (card_name, layer),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT t.name, t.layer, ct.confidence, ct.source, ct.note
+                FROM card_tags ct
+                JOIN tags t ON ct.tag_id = t.id
+                WHERE LOWER(ct.card_id) = LOWER(?)
+                ORDER BY t.layer, ct.confidence DESC
+                """,
+                (card_name,),
+            )
+        return [
+            {
+                "name": row["name"],
+                "layer": row["layer"],
+                "confidence": row["confidence"],
+                "source": row["source"],
+                "note": row["note"],
+            }
+            for row in cur.fetchall()
+        ]
+
+    def all_tags(self, layer: Optional[str] = None) -> List[dict]:
+        """
+        Return all tags in the system, optionally filtered by layer.
+
+        Returns:
+            List of dicts: {id, name, layer, description}
+        """
+        cur = self.conn.cursor()
+        if layer:
+            cur.execute(
+                "SELECT id, name, layer, description FROM tags WHERE LOWER(layer) = LOWER(?) ORDER BY name",
+                (layer,),
+            )
+        else:
+            cur.execute("SELECT id, name, layer, description FROM tags ORDER BY layer, name")
+        return [
+            {"id": row["id"], "name": row["name"], "layer": row["layer"], "description": row["description"]}
+            for row in cur.fetchall()
+        ]
+
+    def query_cards_by_tag(self, tag_name: str, min_confidence: float = 0.0) -> List[dict]:
+        """
+        Find all cards tagged with a given tag.
+
+        Args:
+            tag_name: tag to search for (case-insensitive)
+            min_confidence: only return tags with confidence >= this value
+
+        Returns:
+            List of dicts: {card_name, confidence, source, note}
+        """
         cur = self.conn.cursor()
         cur.execute(
-            "SELECT role, strength FROM card_tags WHERE LOWER(card_name) = LOWER(?)",
-            (card_name,),
+            """
+            SELECT ct.card_id, ct.confidence, ct.source, ct.note
+            FROM card_tags ct
+            JOIN tags t ON ct.tag_id = t.id
+            WHERE LOWER(t.name) = LOWER(?)
+              AND ct.confidence >= ?
+            ORDER BY ct.confidence DESC
+            """,
+            (tag_name, min_confidence),
         )
-        return {row["role"]: row["strength"] for row in cur.fetchall()}
+        return [
+            {
+                "card_name": row["card_id"],
+                "confidence": row["confidence"],
+                "source": row["source"],
+                "note": row["note"],
+            }
+            for row in cur.fetchall()
+        ]
 
-    def load_all_tags(self) -> dict[str, dict[str, int]]:
-        """Load all card tags. Returns {card_name: {role: strength}}."""
+    def tag_count_for_deck(
+        self, card_names: List[str], layer: Optional[str] = None
+    ) -> dict[str, int]:
+        """
+        Count how many cards in a deck have each tag.
+
+        Args:
+            card_names: list of card names in the deck (pass the main deck)
+            layer: optional — filter to one layer ('functional', etc.)
+
+        Returns:
+            {tag_name: count} sorted by count desc
+        """
+        if not card_names:
+            return {}
+
+        placeholders = ",".join("?" * len(card_names))
+        lowered = [n.lower() for n in card_names]
+
         cur = self.conn.cursor()
-        cur.execute("SELECT card_name, role, strength FROM card_tags ORDER BY card_name")
-        result = {}
-        for row in cur.fetchall():
-            if row["card_name"] not in result:
-                result[row["card_name"]] = {}
-            result[row["card_name"]][row["role"]] = row["strength"]
-        return result
+        if layer:
+            cur.execute(
+                f"""
+                SELECT t.name, COUNT(*) as count
+                FROM card_tags ct
+                JOIN tags t ON ct.tag_id = t.id
+                WHERE LOWER(ct.card_id) IN ({placeholders})
+                  AND LOWER(t.layer) = LOWER(?)
+                GROUP BY t.name
+                ORDER BY count DESC
+                """,
+                lowered + [layer],
+            )
+        else:
+            cur.execute(
+                f"""
+                SELECT t.name, COUNT(*) as count
+                FROM card_tags ct
+                JOIN tags t ON ct.tag_id = t.id
+                WHERE LOWER(ct.card_id) IN ({placeholders})
+                GROUP BY t.name
+                ORDER BY t.layer, count DESC
+                """,
+                lowered,
+            )
+        return {row["name"]: row["count"] for row in cur.fetchall()}
+
+    # ─── Synergy operations (phase 2) ─────────────────────────────────────────
+
+    def add_synergy(
+        self,
+        card_a: str,
+        card_b: str,
+        synergy_type: str,
+        strength: float = 0.5,
+        explanation: str = "",
+    ) -> int:
+        """
+        Add a synergy relationship between two cards.
+
+        Strength scale (0.0–1.0):
+            1.0 = core/critical synergy (the combo itself)
+            0.7 = strong synergy
+            0.5 = moderate synergy
+            0.3 = incidental/weak
+
+        Returns:
+            synergy edge id
+        """
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO synergy_edges (card_a, card_b, synergy_type, strength, explanation)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (card_a, card_b, synergy_type, strength, explanation or ""),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def get_synergies(self, card_name: str, min_strength: float = 0.0) -> List[dict]:
+        """
+        Get all synergy relationships for a card (as either card_a or card_b).
+
+        Returns:
+            List of dicts: {other_card, synergy_type, strength, explanation}
+        """
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT
+                CASE WHEN card_a = ? THEN card_b ELSE card_a END AS other_card,
+                synergy_type, strength, explanation
+            FROM synergy_edges
+            WHERE (card_a = ? OR card_b = ?)
+              AND strength >= ?
+            ORDER BY strength DESC
+            """,
+            (card_name, card_name, card_name, min_strength),
+        )
+        return [
+            {
+                "other_card": row["other_card"],
+                "synergy_type": row["synergy_type"],
+                "strength": row["strength"],
+                "explanation": row["explanation"],
+            }
+            for row in cur.fetchall()
+        ]
 
     # ─── Helpers ──────────────────────────────────────────────────────────────
 

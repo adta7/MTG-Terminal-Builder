@@ -56,6 +56,11 @@ DOWNLOADS = os.path.expanduser("~/Downloads")
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DECKS_DIR = os.path.join(SCRIPT_DIR, "decks")
 
+# Make the mtgdeck package importable from this script's location.
+_SRC_DIR = os.path.join(SCRIPT_DIR, "src")
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
+
 DECKBUILDING_COLUMNS = [
     "Name", "Count", "Foil",
     "scryfall_name", "mana_cost", "cmc", "type_line", "oracle_text",
@@ -148,6 +153,67 @@ def get_scryfall_db():
         json_path = find_scryfall_json()
         _scryfall_db = load_scryfall_db(json_path)
     return _scryfall_db
+
+# ─── Tag DB (lazy load, Phase 2) ──────────────────────────────────────────────
+
+_tag_db = None
+
+
+def _get_tag_db():
+    """Lazily open the SQLite tag database. Returns None if unavailable."""
+    global _tag_db
+    if _tag_db is not None:
+        return _tag_db
+    try:
+        from mtgdeck.database import Database
+        db_path = os.path.join(SCRIPT_DIR, "data", "cards.sqlite")
+        if os.path.exists(db_path):
+            _tag_db = Database(db_path)
+            _tag_db.connect()
+    except Exception:
+        pass
+    return _tag_db
+
+
+_TAG_LAYER_COLORS = {
+    "mechanical": "cyan",
+    "functional": "green",
+    "archetype": "yellow",
+    "emotional": "magenta",
+}
+_TAG_LAYER_ORDER = ["mechanical", "functional", "archetype", "emotional"]
+
+
+def print_card_tags(card_name: str):
+    """Print Phase 2 role tags below a card if any have been tagged."""
+    tag_db = _get_tag_db()
+    if tag_db is None:
+        return
+
+    try:
+        all_tags = tag_db.get_card_tags(card_name)
+    except Exception:
+        return
+
+    if not all_tags:
+        return
+
+    # Group by layer
+    grouped: dict = {}
+    for tag in all_tags:
+        grouped.setdefault(tag["layer"], []).append(tag["name"])
+
+    WIDTH = min(term_width() - 2, 72)
+    console.print(f"  [dim]{'─' * (WIDTH - 2)}[/dim]")
+    for layer in _TAG_LAYER_ORDER:
+        names = grouped.get(layer)
+        if not names:
+            continue
+        color = _TAG_LAYER_COLORS[layer]
+        tags_str = "  ".join(f"[{color}]{n}[/{color}]" for n in names)
+        console.print(f"  [dim]{layer:<12}[/dim] {tags_str}")
+    console.print()
+
 
 # ─── Deck Manager ─────────────────────────────────────────────────────────────
 
@@ -1227,6 +1293,7 @@ def run_card_lookup():
 
         if card:
             print_card(card)
+            print_card_tags(card["name"])
 
 # ─── Collection Enhancer Pipeline ─────────────────────────────────────────────
 
