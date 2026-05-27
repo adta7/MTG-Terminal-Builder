@@ -105,8 +105,9 @@ def run_analyzer(db_path: str, deck_name: str):
     from mtgdeck.models import Deck, DeckCard
 
     # Find the deck file
-    # db_path is data/cards.sqlite, so decks_dir is data/decks/
-    decks_dir = Path(db_path).parent / "decks"
+    # mtg.py saves decks in ./decks/ (project root), not data/decks/
+    proj_root = Path(db_path).parent.parent
+    decks_dir = proj_root / "decks"
     deck_files = glob.glob(str(decks_dir / "*.json"))
 
     deck_file = None
@@ -152,7 +153,7 @@ def run_analyzer(db_path: str, deck_name: str):
 
     console.print()
     console.print(f"Cards: {analysis.total_cards}/100")
-    console.print(f"Lands: {analysis.land_count} | Nonlands: {analysis.nonland_count}")
+    console.print(f"Lands: {analysis.land_count} | Spell Permanents: {analysis.spell_permanent_count} | Spell NonPermanents: {analysis.spell_nonpermanent_count}")
     console.print(f"Avg Mana Value: {analysis.avg_mana_value:.2f}")
     console.print(f"Color Identity: {', '.join(analysis.color_identity) or 'None'}")
 

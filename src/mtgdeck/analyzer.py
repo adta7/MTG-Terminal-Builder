@@ -22,10 +22,11 @@ def analyze_deck(deck: Deck, db: Database) -> DeckAnalysis:
     Returns:
         DeckAnalysis object with all computed statistics
     """
-    # Count cards and lands
+    # Count cards by type
     total_cards = deck.main_deck_count()
     land_count = 0
-    nonland_count = 0
+    spell_permanent_count = 0  # creatures, enchantments, artifacts, planeswalkers
+    spell_nonpermanent_count = 0  # instants, sorceries
     mana_curve = defaultdict(int)  # cmc → count
     type_counts = defaultdict(int)  # type → count
     colors_set = set()
@@ -37,34 +38,41 @@ def analyze_deck(deck: Deck, db: Database) -> DeckAnalysis:
 
         count = card_entry.count
 
-        # Track lands vs nonlands
+        # Categorize: Land vs Spell, and Permanent vs NonPermanent
         if "Land" in card.type_line:
             land_count += count
+            type_counts["Land"] += count
+        elif "Instant" in card.type_line:
+            spell_nonpermanent_count += count
+            type_counts["Instant"] += count
+        elif "Sorcery" in card.type_line:
+            spell_nonpermanent_count += count
+            type_counts["Sorcery"] += count
         else:
-            nonland_count += count
+            # Everything else that's not Land/Instant/Sorcery is a permanent
+            spell_permanent_count += count
+            # Determine primary type for type breakdown
+            primary_type = _extract_primary_type(card.type_line)
+            type_counts[primary_type] += count
 
-        # Build mana curve (nonlands only)
+        # Build mana curve (spells only, not lands)
         if "Land" not in card.type_line:
             cmc = min(card.cmc, 7)  # Bucket 7+ as "7"
             mana_curve[cmc] += count
 
-        # Count card types (first word before dash or end)
-        type_main = card.type_line.split("—")[0].strip().split()[0] if card.type_line else ""
-        if type_main:
-            type_counts[type_main] += count
-
         # Track colors
         colors_set.update(card.color_identity)
 
-    # Compute average mana value (nonlands only)
+    # Compute average mana value (spells only, not lands)
+    spell_count = spell_permanent_count + spell_nonpermanent_count
     avg_mv = 0.0
-    if nonland_count > 0:
+    if spell_count > 0:
         total_mv = sum(
             db.card_by_name(c.name).cmc * c.count
             for c in deck.cards
             if db.card_by_name(c.name) and "Land" not in db.card_by_name(c.name).type_line
         )
-        avg_mv = total_mv / nonland_count
+        avg_mv = total_mv / spell_count
 
     # Format mana curve as dict (0-7+)
     curve_formatted = {}
@@ -87,7 +95,8 @@ def analyze_deck(deck: Deck, db: Database) -> DeckAnalysis:
         deck_name=deck.name,
         total_cards=total_cards,
         land_count=land_count,
-        nonland_count=nonland_count,
+        spell_permanent_count=spell_permanent_count,
+        spell_nonpermanent_count=spell_nonpermanent_count,
         avg_mana_value=avg_mv,
         mana_curve=curve_formatted,
         type_counts=dict(type_counts),
@@ -181,3 +190,24 @@ def _matches_color(color_identity: list, condition: str) -> bool:
         return len(color_identity) > 1
     # Single color: check if color is in identity
     return condition.upper() in color_identity
+
+
+def _extract_primary_type(type_line: str) -> str:
+    """
+    Extract the primary type from a card's type line.
+
+    Examples:
+      "Creature — Vampire" → "Creature"
+      "Legendary Creature — Vampire" → "Creature"
+      "Artifact Creature — Golem" → "Creature"
+      "Enchantment — Aura" → "Enchantment"
+      "Planeswalker — Jace" → "Planeswalker"
+    """
+    main_part = type_line.split("—")[0].strip()  # Get before the dash
+
+    # Check for primary types in order of specificity
+    for primary_type in ["Planeswalker", "Creature", "Enchantment", "Artifact"]:
+        if primary_type in main_part:
+            return primary_type
+
+    return "Other"

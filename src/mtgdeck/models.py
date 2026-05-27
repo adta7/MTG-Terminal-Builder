@@ -82,7 +82,8 @@ class DeckAnalysis:
     deck_name: str
     total_cards: int
     land_count: int
-    nonland_count: int
+    spell_permanent_count: int  # creatures, enchantments, artifacts, planeswalkers
+    spell_nonpermanent_count: int  # instants, sorceries
     avg_mana_value: float
     mana_curve: dict[int, int] = field(default_factory=dict)  # cmc → count
     type_counts: dict[str, int] = field(default_factory=dict)  # type → count
