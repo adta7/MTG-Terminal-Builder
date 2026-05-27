@@ -5,6 +5,22 @@ Format: [Version] — Date — Description
 
 ---
 
+## [2.7.0] — 2026-05-27
+
+### Added
+- `src/mtgdeck/profiles.py` — Phase 3: deck profile comparison module; `Profile` and `ProfileGap` dataclasses, `load_profile()`, `count_roles_in_deck()`, `compare_to_profile()`, `find_profile()`
+- `data/profiles/mono_black_reanimator.json` — target ranges for Sheoldred-style 100-card Commander deck (lands, ramp, draw, removal, board wipes, reanimation, sac outlets, protection, graveyard fill, win cons, avg MV)
+- `data/profiles/generic_commander.json` — wide baseline targets for any Commander deck
+- `tests/test_profiles.py` — 30 new tests covering profile loading, gap detection (ok/low/high), lands/avg_mv special cases, role counting for single-function/multi-function/untagged cards, mechanical tag fallback, and `find_profile` lookup; 200 tests total
+- `src/mtgdeck/__main__.py` — `--profile <name>` flag on the `analyze` command; profile comparison table printed after standard analysis
+
+### Changed
+- `src/mtgdeck/__main__.py` — `run_analyzer()` now keeps the DB connection open through the end of the function so profile counting can reuse it (previously closed immediately after `analyze_deck`)
+- `src/mtgdeck/profiles.py` — `sac_outlets` category uses mechanical `Sacrifice_Outlet` tag (precise) rather than functional `Engine`/`Conversion` (too broad); `wincons` uses functional `Finisher` only, not `Payoff` (payoffs ≠ win conditions)
+- `TODO.md` — added Layer 5 emotional rule engine spec and BigQuery comparison experiment
+
+---
+
 ## [2.6.1] — 2026-05-26
 
 ### Fixed

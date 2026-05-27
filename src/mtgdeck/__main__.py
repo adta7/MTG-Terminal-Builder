@@ -18,6 +18,13 @@ from mtgdeck.scryfall import (
     index_cards_into_db,
 )
 from mtgdeck.analyzer import analyze_deck
+from mtgdeck.profiles import (
+    count_roles_in_deck,
+    compare_to_profile,
+    find_profile,
+    load_profile,
+    CATEGORY_DISPLAY_NAMES,
+)
 from rich.console import Console
 
 console = Console()
@@ -44,13 +51,23 @@ def main():
         print("  to initialize the database.\n")
         sys.exit(1)
 
-    # Phase 1: Handle 'analyze' command
+    # Phase 1+3: Handle 'analyze' command
+    # Usage: python -m mtgdeck analyze <deck_name> [--profile <profile_name>]
     if len(sys.argv) > 1 and sys.argv[1] == "analyze":
         if len(sys.argv) < 3:
-            print("\n  Usage: python -m mtgdeck analyze <deck_name>\n")
+            print("\n  Usage: python -m mtgdeck analyze <deck_name> [--profile <name>]\n")
             sys.exit(1)
         deck_name = sys.argv[2]
-        run_analyzer(db_path, deck_name)
+        # Parse optional --profile flag
+        profile_name = None
+        if "--profile" in sys.argv:
+            idx = sys.argv.index("--profile")
+            if idx + 1 < len(sys.argv):
+                profile_name = sys.argv[idx + 1]
+            else:
+                print("\n  --profile requires a profile name.\n")
+                sys.exit(1)
+        run_analyzer(db_path, deck_name, profile_name=profile_name)
         return
 
     # Load the old mtg.py for now (until we fully refactor the UI)
@@ -98,7 +115,7 @@ def setup():
         sys.exit(1)
 
 
-def run_analyzer(db_path: str, deck_name: str):
+def run_analyzer(db_path: str, deck_name: str, profile_name: str | None = None):
     """Phase 1: Analyze a deck."""
     import json
     import glob
@@ -138,12 +155,11 @@ def run_analyzer(db_path: str, deck_name: str):
         edited=data.get("edited", ""),
     )
 
-    # Analyze
+    # Analyze — keep db open through profile comparison if needed
     db = Database(db_path)
     db.connect()
 
     analysis = analyze_deck(deck, db)
-    db.close()
 
     # Print results
     console.print()
@@ -180,7 +196,65 @@ def run_analyzer(db_path: str, deck_name: str):
         for warning in analysis.warnings:
             console.print(f"  ⚠ {warning}")
 
+    # Phase 3: Profile comparison (only when --profile is given)
+    if profile_name:
+        _print_profile_comparison(deck, db, analysis, profile_name, db_path)
+
     console.print()
+    db.close()
+
+
+def _print_profile_comparison(deck, db, analysis, profile_name: str, db_path: str):
+    """Print the profile comparison section of the analyze output."""
+    proj_root = Path(db_path).parent.parent
+    profiles_dir = proj_root / "data" / "profiles"
+
+    try:
+        profile_path = find_profile(profile_name, profiles_dir)
+        profile = load_profile(profile_path)
+    except FileNotFoundError as e:
+        console.print(f"\n  [yellow]⚠ {e}[/yellow]")
+        return
+
+    role_counts = count_roles_in_deck(deck, db)
+    gaps = compare_to_profile(analysis, role_counts, profile)
+
+    console.print()
+    console.print(f"[bold]── Profile: {profile.name} {'─' * max(0, 40 - len(profile.name))}[/bold]")
+    console.print()
+
+    # Column widths for aligned output
+    label_w = max(len(g.display_name) for g in gaps)
+
+    summary_lines = []
+    for gap in gaps:
+        label = gap.display_name.ljust(label_w)
+        # Format actual value: integers without decimal, floats with 1 decimal
+        if gap.actual == int(gap.actual):
+            actual_str = str(int(gap.actual))
+        else:
+            actual_str = f"{gap.actual:.2f}"
+        actual_str = actual_str.rjust(5)
+
+        if gap.status == "ok":
+            icon = "[green]✓[/green]"
+            msg  = f"[dim]{gap.message}[/dim]"
+        elif gap.status == "low":
+            icon = "[yellow]⚠[/yellow]"
+            msg  = f"[yellow]{gap.message}[/yellow]"
+        else:  # high
+            icon = "[cyan]↑[/cyan]"
+            msg  = f"[cyan]{gap.message}[/cyan]"
+
+        console.print(f"  {label}  {actual_str}  {icon}  {msg}")
+        if gap.status != "ok":
+            summary_lines.append(f"{gap.display_name}: {gap.message}")
+
+    if summary_lines:
+        console.print()
+        console.print("[bold yellow]Profile Gaps:[/bold yellow]")
+        for line in summary_lines:
+            console.print(f"  ⚠ {line}")
 
 
 if __name__ == "__main__":

@@ -4,6 +4,42 @@ Planned features and improvements, roughly in priority order.
 
 ---
 
+## Tagging System — Layer 5 Emotional Rule Engine
+
+Layer 5 emotional tags are registered in the DB and ~60 pairs were manually assigned in Stage 2.
+Unlike Layers 3 and 4 (which derive from mechanical tags), Layer 5 derives from **functional + archetype tags** combined — making it the most interpretive layer.
+
+**What it is:**
+A `tag_emotional_from_rules()` function in `tags.py` that fires at lower confidence (0.60–0.75) using
+functional + archetype tag combinations as inputs. Manual tags at 1.0 always win via `tag_card_if_higher()`.
+
+**Rule sketches (functional → emotional):**
+- `Engine` + archetype `Aristocrats` or `Big_Mana`     → `Engine_Core` (0.75)
+- `Fuel` + `Return_Self_From_Graveyard` (mechanical)   → `Renewable_Fuel` (0.75)
+- `Fuel` + archetype `Aristocrats`                     → `Renewable_Fuel` (0.70)
+- `Finisher` + archetype `Reanimator`                  → `Apex_Threat` (0.75)
+- `Conversion`                                         → `Conversion_Piece` (0.80)
+- `Payoff` + archetype `Aristocrats`                   → `Pressure_Piece` (0.75)
+- `Return_Self_From_Graveyard` (mechanical)            → `Resilience_Piece` (0.75)
+- `Undying_Persist` (mechanical)                       → `Resilience_Piece` (0.70)
+- `Finisher` (high confidence)                         → `Grand_Finisher` (0.70)
+- `Mana_Engine` + archetype `Big_Mana`                → `Momentum_Spike` (0.70)
+- `Recursion` + archetype `Reanimator`                 → `Comeback_Card` (0.70)
+- `Finisher` + `Table_Threat` (skip — Table_Threat is meta-dependent, stay manual)
+- `Identity_Card` — always manual (too deck-specific to infer)
+
+**Key constraint:** Tags like `Identity_Card` and `Table_Threat` should stay manual-only.
+They depend on deck identity and meta context that no rule can reliably capture.
+
+**Files to create / modify:**
+- `src/mtgdeck/tags.py` — add `EMOTIONAL_RULES` constant + `tag_emotional_from_rules()`
+- `tests/test_tags.py` — 10-15 new tests: rule fires correctly, manual not downgraded, no false positives on generic staples
+
+**Do not build until Phase 3 (profiles) is complete** — emotional tags feed into Phase 4-5 scoring,
+not into profile comparison. Build this right before scoring needs it.
+
+---
+
 ## Tagging System — Workflow Improvements
 
 These three tools make the tagging system easier to grow over time.
@@ -146,6 +182,21 @@ to make manual copy-paste annoying.
 - [ ] **Multi-JSON support** — if multiple oracle JSON files are in the folder, show a picker with file dates
 - [ ] **Commander legal filter** — quick mode to show only Commander-legal cards from the collection
 - [ ] **Color identity filter** — filter cards by color identity when building a specific deck
+
+---
+
+## Research / Future Sessions
+
+- [ ] **BigQuery tag comparison experiment** — In a separate session: load the oracle text dataset into
+  Google BigQuery and use its SQL-based ML tooling to auto-generate card tags. Then compare BigQuery's
+  output against our hand-tuned rule engine (Layers 2-4) card by card.
+  - Questions to answer: Does BigQuery surface mechanical patterns our regex missed? Does it
+    over-tag? Does it agree on high-confidence cards like Ashnod's Altar?
+  - Long-term angle: BigQuery results could feed into the confidence system as a second source
+    (e.g. if BigQuery + rule engine both agree → confidence 0.95, if only one fires → 0.70)
+  - Could also reveal whether the five-layer ontology maps cleanly to how ML clustering naturally
+    groups oracle text, or whether the layers need reshaping
+  - **Do not start until Phase 3 and 4 are complete** — need a stable baseline to compare against
 
 ---
 
