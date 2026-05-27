@@ -1175,8 +1175,21 @@ def run_deck_manager():
 
 # ─── Card Lookup ──────────────────────────────────────────────────────────────
 
-def print_card(card):
-    WIDTH = min(term_width() - 2, 72)
+# ANSI codes for tag column colors (used in print(), not console.print()).
+_ANSI_TAG = {
+    "mechanical": "\033[36m",   # cyan
+    "functional": "\033[32m",   # green
+    "archetype":  "\033[33m",   # yellow
+    "emotional":  "\033[35m",   # magenta
+    "dim":        "\033[2m",
+    "reset":      "\033[0m",
+}
+
+
+def _build_card_lines(card) -> list[str]:
+    """Render a card as a list of plain-text lines. Does not print anything."""
+    # Narrowed from 72 to 57 to leave room for the tag column on the right.
+    WIDTH = min(term_width() - 2, 57)
     INNER = WIDTH - 2
     TEXT_W = INNER - 2
 
@@ -1201,11 +1214,11 @@ def print_card(card):
         type_line = " // ".join(f.get("type_line", "") for f in faces)
         oracle    = "\n\n".join(f.get("oracle_text", "") for f in faces)
 
-    power    = card.get("power")
+    power     = card.get("power")
     toughness = card.get("toughness")
-    loyalty  = card.get("loyalty")
-    rarity   = card.get("rarity", "").capitalize()
-    set_name = card.get("set_name", "")
+    loyalty   = card.get("loyalty")
+    rarity    = card.get("rarity", "").capitalize()
+    set_name  = card.get("set_name", "")
 
     lines = []
 
@@ -1218,7 +1231,7 @@ def print_card(card):
     lines.append(row(f" {name[:name_w]:<{name_w}}{mana_part}"))
 
     # Image box
-    img_inner = INNER - 4  # 54 chars inside the art border
+    img_inner = INNER - 4
     lines.append(mid_divider())
     lines.append(row(f" ┌{'─' * img_inner}┐ "))
     for _ in range(5):
@@ -1249,16 +1262,67 @@ def print_card(card):
         pt = f"[{loyalty}]"
     else:
         pt = ""
-    pt_part      = f"{pt} " if pt else " "
+    pt_part       = f"{pt} " if pt else " "
     bottom_left_w = INNER - len(pt_part) - 1
-    bottom_left  = f"{rarity} • {set_name}" if set_name else rarity
+    bottom_left   = f"{rarity} • {set_name}" if set_name else rarity
     lines.append(row(f" {bottom_left[:bottom_left_w]:<{bottom_left_w}}{pt_part}"))
 
     # Bottom border
     lines.append(f"└{'─' * INNER}┘")
+    return lines
+
+
+def _build_tag_right_lines(card_name: str) -> list[str]:
+    """
+    Build the tag side-column as plain strings with ANSI color codes.
+    Returns [] if the DB is unavailable or the card has no tags.
+    """
+    tag_db = _get_tag_db()
+    if tag_db is None:
+        return []
+
+    try:
+        all_tags = tag_db.get_card_tags(card_name)
+    except Exception:
+        return []
+
+    if not all_tags:
+        return []
+
+    grouped: dict = {}
+    for tag in all_tags:
+        grouped.setdefault(tag["layer"], []).append(tag["name"])
+
+    dim, reset = _ANSI_TAG["dim"], _ANSI_TAG["reset"]
+    lines = []
+    for layer in _TAG_LAYER_ORDER:
+        names = grouped.get(layer)
+        if not names:
+            continue
+        color = _ANSI_TAG[layer]
+        lines.append(f"{dim}{layer}{reset}")
+        lines.append(f"{dim}{'─' * 16}{reset}")
+        for name in names:
+            lines.append(f"{color}{name}{reset}")
+        lines.append("")   # blank line between layers
+
+    return lines
+
+
+def print_card(card):
+    """Print card frame with tags in a right-hand column."""
+    card_lines = _build_card_lines(card)
+    tag_lines  = _build_tag_right_lines(card.get("name", ""))
+
+    GAP      = "   "
+    card_w   = len(card_lines[0]) if card_lines else 0
+    max_rows = max(len(card_lines), len(tag_lines))
 
     print()
-    print("\n".join(lines))
+    for i in range(max_rows):
+        left  = card_lines[i] if i < len(card_lines) else " " * card_w
+        right = tag_lines[i]  if i < len(tag_lines)  else ""
+        print(left + GAP + right)
     print()
 
 def run_card_lookup():
@@ -1293,7 +1357,6 @@ def run_card_lookup():
 
         if card:
             print_card(card)
-            print_card_tags(card["name"])
 
 # ─── Collection Enhancer Pipeline ─────────────────────────────────────────────
 
