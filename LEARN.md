@@ -718,3 +718,105 @@ def test_swampwalk_evasion(db):
 - `re.search(pattern, oracle.lower())` — always lowercase the oracle text. Scryfall uses mixed case but patterns are case-insensitive.
 - "Looting" (draw-then-discard) is different from "discard as a cost then draw." Check for `then discard` vs `discard [cost] ... draw`. These have very different strategic implications.
 - Adding a tag only costs a few lines. The cost of a missing tag is silent incorrect analysis downstream. When in doubt, add it.
+
+---
+
+## 2026-05-26 (continued) — Stage 2: Functional Rule Engine
+
+### What We Built
+
+A rule-based inference engine that derives Layer 3 (Functional) tags from Layer 2 (Mechanical) tags. 239 functional tags across 75 deck cards, all derived automatically. 0 manual assignments needed.
+
+**Key numbers:**
+- 80+ inference rules in `FUNCTIONAL_RULES`
+- 16 functional tags populated: Enabler (36 cards), Engine (27), Mana_Acceleration (22), Payoff (20), Threat (20), Conversion (20), Recursion (17), Card_Advantage (17), Fuel (16), Removal (14), Interaction (13), Mana_Engine (9), Setup (7), Finisher_Support (7), Protection (5), Finisher (5)
+
+---
+
+### How the Rule Engine Works
+
+The functional rule engine is a set-intersection algorithm:
+
+```python
+for required, functional_tag, confidence in FUNCTIONAL_RULES:
+    if required.issubset(mech_tags):
+        best_confidence[functional_tag] = max(confidence, best_confidence.get(functional_tag, 0.0))
+```
+
+**Three design decisions that matter:**
+
+1. **frozenset as the key, not a list.** Rules must be declarative. A frozenset makes it clear the required tags are unordered — it doesn't matter if the card has `Death_Trigger` before or after `Life_Drain`.
+
+2. **Best-confidence wins, not first-match.** Multiple rules can fire for the same functional tag. `Blood Artist` gets Payoff at 0.90 (Death_Trigger + Life_Drain) and also qualifies for Payoff at 0.85 via another path. The engine stores only 0.90 — the most confident signal wins.
+
+3. **source="rule_engine" on all derived tags.** This distinguishes auto-derived functional tags from manually assigned ones. Later, if you disagree with a derivation, you can override it with source="manual" and the logic that favors higher confidence (manual = 1.0) will respect your judgment.
+
+---
+
+### Reminder Text Is a Double-Edged Sword
+
+Cards like Pitiless Plunderer include Treasure token reminder text:
+> "create a Treasure token. (It's an artifact with 'Sacrifice this artifact: Add one mana of any color.')"
+
+The pattern `r"sacrifice .{1,20}: add"` fires on the reminder text and tags Pitiless Plunderer with `Sacrifice_Outlet` and `Mana_Production`. This is technically a false positive — Pitiless Plunderer itself doesn't have a sac outlet. But the net effect is real: the card creates tokens that are sac outlets, so tagging it `Engine` (via Sacrifice_Outlet + Mana_Production) isn't wrong from a deck-strategy perspective.
+
+**Decision:** Accept this as an acceptable approximation at current confidence levels. If precision matters later, strip reminder text from oracle text before pattern matching.
+
+---
+
+### Rule Design: Single Tags vs. Compound Rules
+
+**Single-tag rules** are broad and low confidence:
+```python
+(frozenset({"Sacrifice_Outlet"}), "Enabler", 0.80)
+```
+Fires for anything that can sacrifice — most of the time correct.
+
+**Compound rules** are specific and high confidence:
+```python
+(frozenset({"Sacrifice_Outlet", "Mana_Production"}), "Engine", 0.90)
+```
+Only fires when both are present — reliable signal.
+
+**Guideline:** Start with compound rules for high-confidence tags (Finisher, Engine). Use single-tag rules only when the single tag is itself highly specific (Tutor_Effect alone → Setup is safe because tutors almost always set up).
+
+---
+
+### Layer 2 Pattern Gaps Found (and Fixed)
+
+During the functional rule design, several mechanical pattern gaps surfaced from specific cards:
+
+| Card | Missing Tag | Root Cause | Fix |
+|---|---|---|---|
+| Braids | Forced_Sacrifice | "may sacrifice" vs "sacrifices" | Added `(?:may )?sacrifice(?:s)?` |
+| Braids | Upkeep_Trigger | "each other player's upkeep" not in alternation | Added to alternation |
+| Braids | Discard_Effect | "that player discards" not covered | Added pattern |
+| Archon of Cruelty | Life_Drain | "and loses 3 life" compound clause | Added `r"and loses? \d+ life"` |
+| Crypt Ghast | Life_Gain | Extort says "gain that much life" | Added `r"you gain that much life"` |
+| Pitiless Plunderer | Token_Generation | Treasure is an artifact token, not creature | Added artifact token pattern |
+| Jadar | Upkeep_Trigger | "end step" not in Upkeep_Trigger timing | Added to alternation |
+| Exsanguinate | (nothing) | No way to distinguish X-spell from fixed drain | Added X_Spell_Effect tag |
+
+**Lesson:** Build functional rules before you think your mechanical layer is complete. The functional rules reveal which mechanical distinctions actually matter.
+
+---
+
+### Verifying the Rule Engine Against Real Cards
+
+After writing rules, spot-check 5–10 cards manually. The test is: does the functional derivation match how you'd actually describe the card to a fellow deckbuilder?
+
+- **Blood Artist** → `Payoff(0.90)` — correct, it's the classic aristocrats payoff
+- **Ashnod's Altar** → `Engine + Conversion` — correct, it converts creatures into mana
+- **Exsanguinate** → `Finisher(0.90)` — correct, this is the win condition
+- **Living Death** → `Recursion + Finisher` — correct, it resets the board in your favor
+- **Reassembling Skeleton** → `Fuel + Recursion` — correct, it's the repeating sacrifice body
+
+If the derivation disagrees with your intuition, either fix the rule or override with a manual tag. The engine is a starting point, not the final word.
+
+---
+
+### Small Advice
+
+- `frozenset({"A", "B"})` not `{"A", "B"}` — frozensets are hashable and can serve as dict keys if you ever need to deduplicate rules.
+- The rule engine is O(n × m) where n = cards, m = rules. With 75 cards and 80 rules this is trivially fast. At 36k cards it's still < 0.1s.
+- Run the mechanical tagger again any time you add new patterns — the database stores tags with UPSERT, so re-running is always safe and always picks up new patterns.

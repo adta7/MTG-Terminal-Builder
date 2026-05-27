@@ -78,6 +78,7 @@ TAGS: list[tuple[str, str, str]] = [
     ("Undying_Persist",   "mechanical", "Returns from graveyard with a +1/+1 or -1/-1 counter — inherently recurs, hard to permanently answer."),
     ("Extort",            "mechanical", "Drains life from all opponents whenever you cast a spell — scales with spell count in multiplayer."),
     ("Devotion_Effect",   "mechanical", "Scales with devotion — counts colored mana symbols among permanents you control."),
+    ("X_Spell_Effect",    "mechanical", "Effect scales with X mana spent — bigger payoff with more mana investment."),
 
     # ── Layer 3: Functional ──────────────────────────────────────────────────
     # What role the card plays in a deck. One card can have multiple functional tags.
@@ -149,18 +150,23 @@ _MECHANICAL_PATTERNS: list[tuple[str, str, float]] = [
     # Life drain / gain
     ("Life_Drain",        r"each opponent loses \w+ life", 0.9),
     ("Life_Drain",        r"target (?:player|opponent) loses \w+ life", 0.9),
+    # Compound clause: "sacrifices a permanent, discards a card, and loses 3 life" — Archon of Cruelty
+    ("Life_Drain",        r"and loses? \d+ life", 0.85),
     ("Life_Gain",         r"you gain \w+ life", 0.9),
     ("Life_Gain",         r"gain \w+ life", 0.8),
     # "you gain life equal to the life lost this way" — Exsanguinate, drain spells
     ("Life_Gain",         r"you gain life equal to", 0.85),
+    # "you gain that much life" — Extort reminder text, Consuming Aberration variants
+    ("Life_Gain",         r"you gain that much life", 0.85),
 
     # Sacrifice outlets (YOU sacrifice as a cost or effect)
     ("Sacrifice_Outlet",  r"sacrifice (?:a|another|any number of) (?:creature|permanent)", 1.0),
     ("Sacrifice_Outlet",  r"sacrifice .{1,20}: add", 1.0),
 
     # Forced sacrifice (OPPONENTS are forced to sacrifice)
-    # Covers: Sheoldred, Grave Pact, Plaguecrafter, Accursed Marauder, Butcher of Malakir
-    ("Forced_Sacrifice",  r"(?:that player|each player|each other player|target opponent|each opponent) sacrifices (?:a |an |another |all )?(?:\w+ )?(?:creature|permanent|planeswalker)", 1.0),
+    # Covers: Sheoldred, Grave Pact, Plaguecrafter, Braids, Butcher of Malakir
+    # "may sacrifice" (Braids) is still a forced choice — same archetype signal.
+    ("Forced_Sacrifice",  r"(?:that player|each player|each other player|target opponent|each opponent) (?:may )?sacrifice(?:s)? (?:a |an |another |all )?(?:\w+ )?(?:creature|permanent|planeswalker)", 1.0),
 
     # Token generation
     # "create a 2/2 black Zombie" — standard format with optional article
@@ -169,6 +175,9 @@ _MECHANICAL_PATTERNS: list[tuple[str, str, float]] = [
     ("Token_Generation",           r"create \w+ \d+/\d+ .{1,40}token", 0.9),
     # "create X creature tokens" — generic token count
     ("Token_Generation",           r"create (?:\w+ )?creature tokens?", 0.85),
+    # Artifact tokens: Treasure, Food, Blood, Clue, Gold, Ichor, Map
+    # "create a Treasure token" — Pitiless Plunderer, Deadly Dispute, etc.
+    ("Token_Generation",           r"create (?:a |an |two |three )?(?:treasure|food|blood|clue|gold|ichor|map) token", 0.9),
 
     # Repeatable token generation — creates tokens on a recurring trigger
     # "at the beginning of your upkeep/turn/end step" or "each player's upkeep"
@@ -228,6 +237,8 @@ _MECHANICAL_PATTERNS: list[tuple[str, str, float]] = [
     ("Discard_Effect",    r"(?:each player|target player|each opponent) discards", 0.9),
     # "each player who can't [sacrifice] discards a card" — Plaguecrafter, Fleshbag Marauder
     ("Discard_Effect",    r"each player who can't discards", 0.85),
+    # "that player discards a card" — Braids conditional discard
+    ("Discard_Effect",    r"that player discards", 0.85),
 
     # Self-mill
     ("Self_Mill",         r"put the top \w+ cards? of your library into your graveyard", 0.9),
@@ -273,9 +284,10 @@ _MECHANICAL_PATTERNS: list[tuple[str, str, float]] = [
     ("Trigger_Doubler",   r"triggers? twice", 0.95),
     ("Trigger_Doubler",   r"each of those triggered abilities triggers an additional time", 0.95),
 
-    # Upkeep / main-phase triggers — fires every turn, strong signal for recurring value / engine pieces
-    # Covers "at the beginning of your upkeep", "each opponent's upkeep", "your first main phase", etc.
-    ("Upkeep_Trigger",    r"at the beginning of (?:your|each|each player's|each opponent's) (?:upkeep|precombat main phase|first main phase)", 0.95),
+    # Upkeep / main-phase / end-step triggers — fires every turn, strong recurring value signal.
+    # Covers: "at the beginning of your upkeep", "each opponent's upkeep",
+    #         "each other player's upkeep" (Braids), "your first main phase", "your end step".
+    ("Upkeep_Trigger",    r"at the beginning of (?:your|each|each player's|each other player's|each opponent's) (?:upkeep|precombat main phase|first main phase|end step)", 0.95),
 
     # ETB triggers
     # Pattern 1: classic wording — "when [name] enters the battlefield"
@@ -346,6 +358,204 @@ _MECHANICAL_PATTERNS: list[tuple[str, str, float]] = [
     # Devotion effects — power scales with colored mana symbols among permanents
     # "your devotion to black" — Gary, Erebos, Nykthos
     ("Devotion_Effect",   r"(?:your|each player's) devotion to (?:\w+|any color)", 0.95),
+
+    # X-spell scaling — effect scales with X mana spent (Exsanguinate, Torment of Hailfire, etc.)
+    # Life-drain X: "each opponent loses X life"
+    ("X_Spell_Effect",    r"each opponent loses x life", 0.95),
+    # Targeted X: "target player loses X life"
+    ("X_Spell_Effect",    r"target player loses x life", 0.90),
+    # Damage X: "deals X damage to each opponent / any target"
+    ("X_Spell_Effect",    r"deals? x damage", 0.90),
+    # Repeated effect: "repeat the following process X times" (Torment of Hailfire)
+    ("X_Spell_Effect",    r"repeat the following process x times", 0.95),
+]
+
+
+# ─── Functional Inference Rules (Layer 3) ────────────────────────────────────
+#
+# Each entry: (frozenset_of_required_mechanical_tags, functional_tag, confidence)
+#
+# A rule fires when ALL mechanical tags in the required set are present on a card.
+# When multiple rules fire for the same functional tag, the highest confidence wins.
+# Confidence semantics:
+#   0.90+ = near-certain (strong mechanical evidence)
+#   0.70–0.89 = probable (good but indirect evidence)
+#   0.50–0.69 = plausible (weak evidence — single-tag rules for broad tags)
+
+FUNCTIONAL_RULES: list[tuple[frozenset, str, float]] = [
+
+    # ── Mana_Acceleration ────────────────────────────────────────────────────
+    # Any card that produces more mana than it costs (rocks, ramp, doublers, reducers)
+    (frozenset({"Mana_Production"}),                                "Mana_Acceleration", 0.75),
+    (frozenset({"Mana_Multiplier"}),                                "Mana_Acceleration", 0.90),
+    (frozenset({"Search_For_Land"}),                                "Mana_Acceleration", 0.80),
+    (frozenset({"Cost_Reduction"}),                                 "Mana_Acceleration", 0.65),
+    (frozenset({"Life_Payment"}),                                   "Mana_Acceleration", 0.60),
+
+    # ── Mana_Engine ──────────────────────────────────────────────────────────
+    # Repeating, scaling, or amplifying mana production — more than basic ramp
+    (frozenset({"Mana_Multiplier"}),                                "Mana_Engine",       0.90),
+    (frozenset({"Mana_Production", "Upkeep_Trigger"}),              "Mana_Engine",       0.85),
+    (frozenset({"Mana_Production", "Scales_With_Deaths"}),          "Mana_Engine",       0.85),
+    (frozenset({"Mana_Production", "Permanent_Scaling"}),           "Mana_Engine",       0.85),
+    (frozenset({"Mana_Production", "Sacrifice_Outlet"}),            "Mana_Engine",       0.85),
+    (frozenset({"Mana_Production", "Death_Trigger"}),               "Mana_Engine",       0.80),
+
+    # ── Card_Advantage ───────────────────────────────────────────────────────
+    # Generates card advantage — draws, tutors, or replaces itself
+    (frozenset({"Draw_Effect"}),                                    "Card_Advantage",    0.80),
+    (frozenset({"Tutor_Effect"}),                                   "Card_Advantage",    0.90),
+    (frozenset({"Looting_Effect"}),                                 "Card_Advantage",    0.65),
+    (frozenset({"Draw_Effect", "Death_Trigger"}),                   "Card_Advantage",    0.85),
+    (frozenset({"Draw_Effect", "Upkeep_Trigger"}),                  "Card_Advantage",    0.90),
+    (frozenset({"Draw_Effect", "ETB_Trigger"}),                     "Card_Advantage",    0.80),
+    (frozenset({"Draw_Effect", "Combat_Trigger"}),                  "Card_Advantage",    0.80),
+
+    # ── Removal ──────────────────────────────────────────────────────────────
+    # Eliminates threats — spot removal, board wipes, or disruptive sacrifice
+    (frozenset({"Targeted_Removal"}),                               "Removal",           0.95),
+    (frozenset({"Board_Wipe"}),                                     "Removal",           0.95),
+    (frozenset({"Forced_Sacrifice"}),                               "Removal",           0.85),
+    (frozenset({"Counter_Spell"}),                                  "Removal",           0.85),
+    (frozenset({"Bounce_Effect"}),                                  "Removal",           0.65),
+    (frozenset({"Discard_Effect"}),                                 "Removal",           0.60),
+    (frozenset({"Graveyard_Hate"}),                                 "Removal",           0.70),
+    (frozenset({"Damage_Effect"}),                                  "Removal",           0.55),
+
+    # ── Interaction ──────────────────────────────────────────────────────────
+    # Disrupts opponents — broader than removal, includes counters and discard
+    (frozenset({"Counter_Spell"}),                                  "Interaction",       0.95),
+    (frozenset({"Targeted_Removal"}),                               "Interaction",       0.90),
+    (frozenset({"Forced_Sacrifice"}),                               "Interaction",       0.85),
+    (frozenset({"Discard_Effect"}),                                 "Interaction",       0.80),
+    (frozenset({"Board_Wipe"}),                                     "Interaction",       0.80),
+    (frozenset({"Bounce_Effect"}),                                  "Interaction",       0.75),
+    (frozenset({"Graveyard_Hate"}),                                 "Interaction",       0.80),
+
+    # ── Protection ───────────────────────────────────────────────────────────
+    # Shields key cards or the board state from removal
+    (frozenset({"Protection_Effect"}),                              "Protection",        0.90),
+    (frozenset({"Counter_Spell"}),                                  "Protection",        0.75),
+
+    # ── Threat ───────────────────────────────────────────────────────────────
+    # Is itself a threat that demands an immediate answer
+    (frozenset({"Forced_Sacrifice", "Upkeep_Trigger"}),             "Threat",            0.85),
+    (frozenset({"Forced_Sacrifice", "ETB_Trigger"}),                "Threat",            0.80),
+    (frozenset({"Forced_Sacrifice", "Death_Trigger"}),              "Threat",            0.80),
+    (frozenset({"Evasion", "Combat_Trigger"}),                      "Threat",            0.80),
+    (frozenset({"Evasion", "Life_Drain"}),                          "Threat",            0.75),
+    (frozenset({"Evasion", "Forced_Sacrifice"}),                    "Threat",            0.80),
+    (frozenset({"Life_Drain", "ETB_Trigger"}),                      "Threat",            0.70),
+    (frozenset({"Death_Trigger", "Life_Drain"}),                    "Threat",            0.75),
+    (frozenset({"Deathtouch", "Combat_Trigger"}),                   "Threat",            0.70),
+    (frozenset({"Combat_Trigger", "Token_Generation"}),             "Threat",            0.70),
+    (frozenset({"Sacrifice_Outlet", "Token_Generation"}),           "Threat",            0.70),
+    (frozenset({"Evasion", "Lifelink"}),                            "Threat",            0.70),
+    (frozenset({"Forced_Sacrifice"}),                               "Threat",            0.60),
+    (frozenset({"Evasion"}),                                        "Threat",            0.50),
+
+    # ── Finisher ─────────────────────────────────────────────────────────────
+    # Can directly close out the game when conditions are met
+    (frozenset({"X_Spell_Effect", "Life_Drain"}),                   "Finisher",          0.90),
+    (frozenset({"Life_Drain", "Permanent_Scaling"}),                "Finisher",          0.85),
+    (frozenset({"Life_Drain", "Devotion_Effect"}),                  "Finisher",          0.85),
+    (frozenset({"Life_Drain", "Scales_With_Deaths"}),               "Finisher",          0.80),
+    (frozenset({"Board_Wipe", "Mass_Reanimate"}),                   "Finisher",          0.85),
+    (frozenset({"Mass_Reanimate"}),                                 "Finisher",          0.70),
+    (frozenset({"Damage_Effect", "Permanent_Scaling"}),             "Finisher",          0.75),
+    (frozenset({"Life_Drain", "Sacrifice_Outlet"}),                 "Finisher",          0.75),
+
+    # ── Finisher_Support ─────────────────────────────────────────────────────
+    # Powers up or enables finishers without being one itself
+    (frozenset({"Mana_Multiplier"}),                                "Finisher_Support",  0.80),
+    (frozenset({"Mana_Production", "Permanent_Scaling"}),           "Finisher_Support",  0.75),
+    (frozenset({"Tutor_Effect"}),                                   "Finisher_Support",  0.65),
+    (frozenset({"Self_Mill"}),                                      "Finisher_Support",  0.55),
+
+    # ── Engine ───────────────────────────────────────────────────────────────
+    # Enables the deck's core plan repeatedly — combines two meaningful abilities
+    (frozenset({"Sacrifice_Outlet", "Mana_Production"}),            "Engine",            0.90),
+    (frozenset({"Sacrifice_Outlet", "Draw_Effect"}),                "Engine",            0.90),
+    (frozenset({"Death_Trigger", "Mana_Production"}),               "Engine",            0.85),
+    (frozenset({"Death_Trigger", "Draw_Effect"}),                   "Engine",            0.85),
+    (frozenset({"Upkeep_Trigger", "Mana_Production"}),              "Engine",            0.85),
+    (frozenset({"Upkeep_Trigger", "Draw_Effect"}),                  "Engine",            0.85),
+    (frozenset({"Scales_With_Deaths", "Mana_Production"}),          "Engine",            0.85),
+    (frozenset({"Repeatable_Token_Generation"}),                    "Engine",            0.75),
+    (frozenset({"Trigger_Doubler"}),                                "Engine",            0.80),
+    (frozenset({"Death_Trigger", "Forced_Sacrifice"}),              "Engine",            0.85),
+    (frozenset({"Sacrifice_Outlet", "Token_Generation"}),           "Engine",            0.80),
+    (frozenset({"Sacrifice_Outlet", "Reanimation"}),                "Engine",            0.80),
+    (frozenset({"Reanimation", "Upkeep_Trigger"}),                  "Engine",            0.85),
+    (frozenset({"Forced_Sacrifice", "Draw_Effect"}),                "Engine",            0.75),
+    (frozenset({"Life_Payment"}),                                   "Engine",            0.65),
+
+    # ── Fuel ─────────────────────────────────────────────────────────────────
+    # Provides expendable resources (tokens, recurring bodies, self-mill) for the engine
+    (frozenset({"Return_Self_From_Graveyard"}),                     "Fuel",              0.85),
+    (frozenset({"Repeatable_Token_Generation"}),                    "Fuel",              0.85),
+    (frozenset({"Token_Generation"}),                               "Fuel",              0.65),
+    (frozenset({"Undying_Persist"}),                                "Fuel",              0.80),
+    (frozenset({"Self_Mill"}),                                      "Fuel",              0.60),
+
+    # ── Payoff ───────────────────────────────────────────────────────────────
+    # Rewards executing the plan with damage, life, cards, or mana
+    (frozenset({"Death_Trigger", "Life_Drain"}),                    "Payoff",            0.90),
+    (frozenset({"Death_Trigger", "Life_Gain"}),                     "Payoff",            0.85),
+    (frozenset({"Death_Trigger", "Draw_Effect"}),                   "Payoff",            0.85),
+    (frozenset({"Death_Trigger", "Mana_Production"}),               "Payoff",            0.75),
+    (frozenset({"Death_Trigger", "Token_Generation"}),              "Payoff",            0.80),
+    (frozenset({"Scales_With_Deaths"}),                             "Payoff",            0.80),
+    (frozenset({"ETB_Trigger", "Life_Drain"}),                      "Payoff",            0.80),
+    (frozenset({"ETB_Trigger", "Forced_Sacrifice"}),                "Payoff",            0.75),
+    (frozenset({"Combat_Trigger", "Draw_Effect"}),                  "Payoff",            0.75),
+    (frozenset({"Combat_Trigger", "Token_Generation"}),             "Payoff",            0.80),
+    (frozenset({"Combat_Trigger", "Life_Drain"}),                   "Payoff",            0.80),
+    (frozenset({"Devotion_Effect", "Life_Drain"}),                  "Payoff",            0.85),
+    (frozenset({"Upkeep_Trigger", "Draw_Effect"}),                  "Payoff",            0.80),
+    (frozenset({"Upkeep_Trigger", "Life_Drain"}),                   "Payoff",            0.80),
+    (frozenset({"Forced_Sacrifice", "Draw_Effect"}),                "Payoff",            0.75),
+    (frozenset({"Extort"}),                                         "Payoff",            0.70),
+
+    # ── Enabler ──────────────────────────────────────────────────────────────
+    # Enables key combos, synergies, or plans without being the payoff itself
+    (frozenset({"Sacrifice_Outlet"}),                               "Enabler",           0.80),
+    (frozenset({"Tutor_Effect"}),                                   "Enabler",           0.80),
+    (frozenset({"Self_Mill"}),                                      "Enabler",           0.70),
+    (frozenset({"Looting_Effect"}),                                 "Enabler",           0.65),
+    (frozenset({"Reanimation"}),                                    "Enabler",           0.70),
+    (frozenset({"Cost_Reduction"}),                                 "Enabler",           0.75),
+    (frozenset({"Trigger_Doubler"}),                                "Enabler",           0.80),
+    (frozenset({"Mass_Reanimate"}),                                 "Enabler",           0.70),
+
+    # ── Recursion ────────────────────────────────────────────────────────────
+    # Returns things from the graveyard to hand or battlefield
+    (frozenset({"Reanimation"}),                                    "Recursion",         0.95),
+    (frozenset({"Mass_Reanimate"}),                                 "Recursion",         0.95),
+    (frozenset({"Recursion_To_Hand"}),                              "Recursion",         0.90),
+    (frozenset({"Return_Self_From_Graveyard"}),                     "Recursion",         0.85),
+
+    # ── Setup ────────────────────────────────────────────────────────────────
+    # Sets up future turns — tutors, self-mill, looting
+    (frozenset({"Tutor_Effect"}),                                   "Setup",             0.90),
+    (frozenset({"Self_Mill"}),                                      "Setup",             0.75),
+    (frozenset({"Looting_Effect"}),                                 "Setup",             0.70),
+    (frozenset({"Search_For_Land"}),                                "Setup",             0.65),
+
+    # ── Conversion ───────────────────────────────────────────────────────────
+    # Converts one resource into another (creatures→mana, life→cards, etc.)
+    (frozenset({"Sacrifice_Outlet", "Mana_Production"}),            "Conversion",        0.90),
+    (frozenset({"Sacrifice_Outlet", "Draw_Effect"}),                "Conversion",        0.90),
+    (frozenset({"Life_Payment", "Mana_Production"}),                "Conversion",        0.85),
+    (frozenset({"Life_Payment", "Draw_Effect"}),                    "Conversion",        0.85),
+    (frozenset({"Life_Payment", "Recursion_To_Hand"}),              "Conversion",        0.80),
+    (frozenset({"Sacrifice_Outlet", "Token_Generation"}),           "Conversion",        0.80),
+    (frozenset({"Death_Trigger", "Draw_Effect"}),                   "Conversion",        0.65),
+    (frozenset({"Death_Trigger", "Mana_Production"}),               "Conversion",        0.70),
+    (frozenset({"Death_Trigger", "Token_Generation"}),              "Conversion",        0.65),
+    (frozenset({"Scales_With_Deaths", "Mana_Production"}),          "Conversion",        0.75),
+    (frozenset({"Looting_Effect"}),                                 "Conversion",        0.65),
+    (frozenset({"Life_Payment"}),                                   "Conversion",        0.65),
 ]
 
 
@@ -507,6 +717,48 @@ def tag_mechanical(card: Card, db) -> list[str]:
 
     # Deduplicate (same tag may match multiple patterns)
     return list(dict.fromkeys(applied))
+
+
+def tag_functional_from_rules(card_name: str, db) -> list[str]:
+    """
+    Derive functional tags (Layer 3) from a card's mechanical tags using FUNCTIONAL_RULES.
+
+    Requires the card to already have mechanical tags stored in the database.
+    Safe to call multiple times — uses upsert, so the best confidence always wins.
+
+    Args:
+        card_name: exact card name (must have mechanical tags in the database)
+        db:        open Database connection
+
+    Returns:
+        List of functional tag names that were applied or updated.
+
+    Usage:
+        card = db.card_by_name("Blood Artist")
+        tag_mechanical(card, db)           # Layer 2 first
+        tag_functional_from_rules("Blood Artist", db)  # → ["Payoff", "Threat", ...]
+    """
+    mech_tags = {t["name"] for t in db.get_card_tags(card_name, layer="mechanical")}
+
+    if not mech_tags:
+        return []
+
+    # Collect highest confidence for each functional tag that fires.
+    # Multiple rules can fire for the same tag — keep the best one.
+    best_confidence: dict[str, float] = {}
+    for required, functional_tag, confidence in FUNCTIONAL_RULES:
+        if required.issubset(mech_tags):
+            if confidence > best_confidence.get(functional_tag, 0.0):
+                best_confidence[functional_tag] = confidence
+
+    # Apply all derived functional tags to the database.
+    applied = []
+    for functional_tag, confidence in best_confidence.items():
+        success = db.tag_card(card_name, functional_tag, confidence, source="rule_engine")
+        if success:
+            applied.append(functional_tag)
+
+    return applied
 
 
 def tag_count_for_deck(card_names: list[str], db, layer: Optional[str] = None) -> dict[str, int]:

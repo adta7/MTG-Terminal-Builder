@@ -5,6 +5,25 @@ Format: [Version] — Date — Description
 
 ---
 
+## [2.5.0] — 2026-05-26
+
+### Added
+- `src/mtgdeck/tags.py` — `X_Spell_Effect` mechanical tag (effects that scale with X mana spent — Exsanguinate, Torment of Hailfire)
+- `src/mtgdeck/tags.py` — `FUNCTIONAL_RULES` constant: 80+ inference rules mapping mechanical tag combinations to functional tags
+- `src/mtgdeck/tags.py` — `tag_functional_from_rules(card_name, db)` function: derives Layer 3 functional tags from Layer 2 mechanical tags via rule engine; best-confidence deduplication, source="rule_engine"
+- `tests/test_tags.py` — 29 new tests across 8 new test classes: pattern gap fixes and functional rule engine verification (142 tests total)
+
+### Changed
+- `src/mtgdeck/tags.py` — `Forced_Sacrifice` pattern extended to catch "may sacrifice" (Braids, Archon of Cruelty ETB)
+- `src/mtgdeck/tags.py` — `Life_Drain` now also catches compound-clause drain ("and loses 3 life" — Archon of Cruelty)
+- `src/mtgdeck/tags.py` — `Life_Gain` now also catches "you gain that much life" (Extort reminder text, drain-spell payback)
+- `src/mtgdeck/tags.py` — `Token_Generation` now covers artifact tokens (Treasure, Food, Blood, Clue, Gold, Ichor, Map)
+- `src/mtgdeck/tags.py` — `Upkeep_Trigger` now covers "each other player's upkeep" (Braids) and "end step" timing
+- `src/mtgdeck/tags.py` — `Discard_Effect` now catches "that player discards" (Braids conditional clause)
+- `data/cards.sqlite` — All 75 deck cards re-tagged with updated mechanical patterns; 239 functional tags applied across 75 cards (5 Finishers, 27 Engines, 20 Payoffs, 17 Recursion)
+
+---
+
 ## [2.4.0] — 2026-05-26
 
 ### Added
