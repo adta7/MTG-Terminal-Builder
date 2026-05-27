@@ -1086,3 +1086,266 @@ class TestTagFunctionalFromRules:
         assert "Setup" in func_names
         assert "Card_Advantage" in func_names
         assert "Enabler" in func_names
+
+
+# ─── tag_card_if_higher ───────────────────────────────────────────────────────
+
+class TestTagCardIfHigher:
+    """Verify the best-confidence upsert protects manual tags from rule downgrades."""
+
+    def test_manual_not_downgraded_by_lower_confidence(self, db):
+        """A rule_engine tag at 0.85 must not overwrite a manual tag at 1.0."""
+        db.tag_card("Blood Artist", "Aristocrats", 1.0, source="manual")
+        db.tag_card_if_higher("Blood Artist", "Aristocrats", 0.85, source="rule_engine")
+        result = [t for t in db.get_card_tags("Blood Artist", layer="archetype")
+                  if t["name"] == "Aristocrats"]
+        assert len(result) == 1
+        assert abs(result[0]["confidence"] - 1.0) < 0.001
+        assert result[0]["source"] == "manual"
+
+    def test_higher_confidence_upgrades(self, db):
+        """A rule at 0.90 should upgrade a prior rule at 0.80."""
+        db.tag_card_if_higher("Test Card", "Sacrifice", 0.80, source="rule_engine")
+        db.tag_card_if_higher("Test Card", "Sacrifice", 0.90, source="rule_engine")
+        result = [t for t in db.get_card_tags("Test Card", layer="archetype")
+                  if t["name"] == "Sacrifice"]
+        assert len(result) == 1
+        assert abs(result[0]["confidence"] - 0.90) < 0.001
+
+    def test_lower_confidence_does_not_downgrade(self, db):
+        """A rule at 0.60 must not downgrade a prior rule at 0.80."""
+        db.tag_card_if_higher("Test Card", "Reanimator", 0.80, source="rule_engine")
+        db.tag_card_if_higher("Test Card", "Reanimator", 0.60, source="rule_engine")
+        result = [t for t in db.get_card_tags("Test Card", layer="archetype")
+                  if t["name"] == "Reanimator"]
+        assert abs(result[0]["confidence"] - 0.80) < 0.001
+
+    def test_first_write_inserts_correctly(self, db):
+        """tag_card_if_higher on a fresh card inserts correctly."""
+        db.tag_card_if_higher("New Card", "Graveyard", 0.75, source="rule_engine")
+        result = db.get_card_tags("New Card", layer="archetype")
+        assert len(result) == 1
+        assert result[0]["name"] == "Graveyard"
+        assert abs(result[0]["confidence"] - 0.75) < 0.001
+
+    def test_unknown_tag_returns_false(self, db):
+        result = db.tag_card_if_higher("Any Card", "Not_A_Real_Tag", 0.5)
+        assert result is False
+
+
+# ─── tag_archetype_from_rules ─────────────────────────────────────────────────
+
+class TestTagArchetypeFromRules:
+    """
+    Verify ARCHETYPE_RULES derive correct Layer 4 tags from Layer 2 mechanical tags.
+
+    Pattern: manually apply mechanical tags, run the rule engine, check archetypes.
+    """
+
+    def _apply_mech(self, db, card_name: str, *tag_names: str):
+        for t in tag_names:
+            db.tag_card(card_name, t, 1.0, source="regex")
+
+    def test_no_mechanical_tags_returns_empty(self, db):
+        result = tags.tag_archetype_from_rules("Unknown Card", db)
+        assert result == []
+
+    def test_source_is_rule_engine(self, db):
+        self._apply_mech(db, "Test Card", "Sacrifice_Outlet")
+        tags.tag_archetype_from_rules("Test Card", db)
+        arch = db.get_card_tags("Test Card", layer="archetype")
+        for t in arch:
+            assert t["source"] == "rule_engine"
+
+    def test_idempotent(self, db):
+        """Running archetype rules twice produces no duplicates."""
+        self._apply_mech(db, "Test Card", "Sacrifice_Outlet")
+        tags.tag_archetype_from_rules("Test Card", db)
+        tags.tag_archetype_from_rules("Test Card", db)
+        arch = [t for t in db.get_card_tags("Test Card", layer="archetype")
+                if t["name"] == "Sacrifice"]
+        assert len(arch) == 1
+
+    def test_manual_tag_protected(self, db):
+        """Manual tag at 1.0 must survive a rule firing at lower confidence."""
+        self._apply_mech(db, "Blood Artist", "Sacrifice_Outlet")
+        db.tag_card("Blood Artist", "Aristocrats", 1.0, source="manual")
+        tags.tag_archetype_from_rules("Blood Artist", db)
+        arch = {t["name"]: t for t in db.get_card_tags("Blood Artist", layer="archetype")}
+        assert abs(arch["Aristocrats"]["confidence"] - 1.0) < 0.001
+        assert arch["Aristocrats"]["source"] == "manual"
+
+    # ── Aristocrats ───────────────────────────────────────────────────────────
+
+    def test_death_trigger_life_drain_gives_aristocrats(self, db):
+        card = _make_card("Blood Artist",
+                          "Whenever Blood Artist or another creature dies, "
+                          "target player loses 1 life and you gain 1 life.")
+        tags.tag_mechanical(card, db)
+        tags.tag_archetype_from_rules("Blood Artist", db)
+        arch = {t["name"] for t in db.get_card_tags("Blood Artist", layer="archetype")}
+        assert "Aristocrats" in arch
+
+    def test_sacrifice_outlet_alone_gives_aristocrats_low_confidence(self, db):
+        self._apply_mech(db, "Test Card", "Sacrifice_Outlet")
+        tags.tag_archetype_from_rules("Test Card", db)
+        arch = {t["name"]: t["confidence"]
+                for t in db.get_card_tags("Test Card", layer="archetype")}
+        assert "Aristocrats" in arch
+        assert arch["Aristocrats"] < 0.80  # single-tag rule must stay low
+
+    def test_return_self_from_graveyard_gives_aristocrats(self, db):
+        card = _make_card("Reassembling Skeleton",
+                          "{1}{B}: Return this card from your graveyard to the battlefield tapped.")
+        tags.tag_mechanical(card, db)
+        tags.tag_archetype_from_rules("Reassembling Skeleton", db)
+        arch = {t["name"] for t in db.get_card_tags("Reassembling Skeleton", layer="archetype")}
+        assert "Aristocrats" in arch
+
+    def test_undying_persist_gives_aristocrats(self, db):
+        self._apply_mech(db, "Test Card", "Undying_Persist")
+        tags.tag_archetype_from_rules("Test Card", db)
+        arch = {t["name"] for t in db.get_card_tags("Test Card", layer="archetype")}
+        assert "Aristocrats" in arch
+
+    # ── Reanimator + Graveyard ────────────────────────────────────────────────
+
+    def test_reanimation_gives_reanimator_and_graveyard(self, db):
+        card = _make_card("Animate Dead",
+                          "Return target creature card from a graveyard to the battlefield "
+                          "under your control.")
+        tags.tag_mechanical(card, db)
+        tags.tag_archetype_from_rules("Animate Dead", db)
+        arch = {t["name"] for t in db.get_card_tags("Animate Dead", layer="archetype")}
+        assert "Reanimator" in arch
+        assert "Graveyard" in arch
+
+    def test_mass_reanimate_gives_highest_confidence_reanimator(self, db):
+        self._apply_mech(db, "Living Death", "Mass_Reanimate", "Board_Wipe")
+        tags.tag_archetype_from_rules("Living Death", db)
+        arch = {t["name"]: t["confidence"]
+                for t in db.get_card_tags("Living Death", layer="archetype")}
+        assert "Reanimator" in arch
+        assert abs(arch["Reanimator"] - 0.95) < 0.001
+
+    def test_self_mill_gives_graveyard_and_reanimator(self, db):
+        self._apply_mech(db, "Test Card", "Self_Mill")
+        tags.tag_archetype_from_rules("Test Card", db)
+        arch = {t["name"] for t in db.get_card_tags("Test Card", layer="archetype")}
+        assert "Graveyard" in arch
+        assert "Reanimator" in arch
+
+    # ── Big_Mana ─────────────────────────────────────────────────────────────
+
+    def test_mana_multiplier_gives_big_mana(self, db):
+        card = _make_card("Crypt Ghast",
+                          "Whenever you tap a Swamp for mana, add an additional {B}. "
+                          "Extort (Whenever you cast a spell, you may pay {W/B}. "
+                          "If you do, each opponent loses 1 life and you gain that much life.)")
+        tags.tag_mechanical(card, db)
+        tags.tag_archetype_from_rules("Crypt Ghast", db)
+        arch = {t["name"] for t in db.get_card_tags("Crypt Ghast", layer="archetype")}
+        assert "Big_Mana" in arch
+
+    def test_x_spell_life_drain_gives_big_mana(self, db):
+        card = _make_card("Exsanguinate",
+                          "Each opponent loses X life. You gain life equal to the life lost this way.")
+        tags.tag_mechanical(card, db)
+        tags.tag_archetype_from_rules("Exsanguinate", db)
+        arch = {t["name"] for t in db.get_card_tags("Exsanguinate", layer="archetype")}
+        assert "Big_Mana" in arch
+
+    def test_cost_reduction_gives_big_mana(self, db):
+        self._apply_mech(db, "Jet Medallion", "Cost_Reduction")
+        tags.tag_archetype_from_rules("Jet Medallion", db)
+        arch = {t["name"] for t in db.get_card_tags("Jet Medallion", layer="archetype")}
+        assert "Big_Mana" in arch
+
+    # ── Devotion ─────────────────────────────────────────────────────────────
+
+    def test_devotion_effect_gives_devotion(self, db):
+        card = _make_card("Gray Merchant of Asphodel",
+                          "When this enters, each opponent loses X life, "
+                          "where X is your devotion to black.")
+        tags.tag_mechanical(card, db)
+        tags.tag_archetype_from_rules("Gray Merchant of Asphodel", db)
+        arch = {t["name"]: t["confidence"]
+                for t in db.get_card_tags("Gray Merchant of Asphodel", layer="archetype")}
+        assert "Devotion" in arch
+        assert abs(arch["Devotion"] - 0.95) < 0.001  # definitional — should be highest
+
+    # ── Tokens ───────────────────────────────────────────────────────────────
+
+    def test_repeatable_token_gen_gives_tokens(self, db):
+        card = _make_card("Ophiomancer",
+                          "At the beginning of your upkeep, if you control no Snakes, "
+                          "create a 1/1 black Snake creature token with deathtouch.")
+        tags.tag_mechanical(card, db)
+        tags.tag_archetype_from_rules("Ophiomancer", db)
+        arch = {t["name"] for t in db.get_card_tags("Ophiomancer", layer="archetype")}
+        assert "Tokens" in arch
+
+    # ── Lifegain ─────────────────────────────────────────────────────────────
+
+    def test_exsanguinate_gets_lifegain(self, db):
+        """X_Spell_Effect + Life_Drain → Lifegain (X-drain spells gain life)."""
+        card = _make_card("Exsanguinate",
+                          "Each opponent loses X life. You gain life equal to the life lost this way.")
+        tags.tag_mechanical(card, db)
+        tags.tag_archetype_from_rules("Exsanguinate", db)
+        arch = {t["name"] for t in db.get_card_tags("Exsanguinate", layer="archetype")}
+        assert "Lifegain" in arch
+
+    # ── Control ──────────────────────────────────────────────────────────────
+
+    def test_board_wipe_gives_control(self, db):
+        card = _make_card("Damnation", "Destroy all creatures. They can't be regenerated.")
+        tags.tag_mechanical(card, db)
+        tags.tag_archetype_from_rules("Damnation", db)
+        arch = {t["name"] for t in db.get_card_tags("Damnation", layer="archetype")}
+        assert "Control" in arch
+
+    def test_targeted_removal_gives_control(self, db):
+        self._apply_mech(db, "Malicious Affliction", "Targeted_Removal")
+        tags.tag_archetype_from_rules("Malicious Affliction", db)
+        arch = {t["name"] for t in db.get_card_tags("Malicious Affliction", layer="archetype")}
+        assert "Control" in arch
+
+    # ── Stax ─────────────────────────────────────────────────────────────────
+
+    def test_forced_sacrifice_plus_upkeep_gives_stax(self, db):
+        """Braids / Sheoldred pattern: force opponent sacs every upkeep = Stax."""
+        self._apply_mech(db, "Sheoldred Test", "Forced_Sacrifice", "Upkeep_Trigger")
+        tags.tag_archetype_from_rules("Sheoldred Test", db)
+        arch = {t["name"] for t in db.get_card_tags("Sheoldred Test", layer="archetype")}
+        assert "Stax" in arch
+
+    # ── Voltron ──────────────────────────────────────────────────────────────
+
+    def test_permanent_scaling_plus_evasion_gives_voltron(self, db):
+        """Lashwrithe pattern: scales with lands + needs evasion to win = Voltron."""
+        card = _make_card("Lashwrithe",
+                          "Living weapon. "
+                          "Equipped creature gets +1/+1 for each Swamp you control.")
+        tags.tag_mechanical(card, db)
+        # Add Evasion manually since Lashwrithe grants it via equipped creature
+        db.tag_card("Lashwrithe", "Evasion", 0.8, source="manual")
+        tags.tag_archetype_from_rules("Lashwrithe", db)
+        arch = {t["name"] for t in db.get_card_tags("Lashwrithe", layer="archetype")}
+        assert "Voltron" in arch
+
+    # ── Generic staples get NO archetype tag from rules ───────────────────────
+
+    def test_tutor_alone_gets_no_archetype(self, db):
+        """A generic tutor fits every strategy — no archetype tag from rules."""
+        self._apply_mech(db, "Demonic Tutor", "Tutor_Effect")
+        tags.tag_archetype_from_rules("Demonic Tutor", db)
+        arch = db.get_card_tags("Demonic Tutor", layer="archetype")
+        assert arch == []
+
+    def test_mana_production_alone_gets_no_archetype(self, db):
+        """A pure mana rock (Sol Ring, Arcane Signet) fires no archetype rule."""
+        self._apply_mech(db, "Sol Ring", "Mana_Production")
+        tags.tag_archetype_from_rules("Sol Ring", db)
+        arch = db.get_card_tags("Sol Ring", layer="archetype")
+        assert arch == []

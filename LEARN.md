@@ -820,3 +820,80 @@ If the derivation disagrees with your intuition, either fix the rule or override
 - `frozenset({"A", "B"})` not `{"A", "B"}` — frozensets are hashable and can serve as dict keys if you ever need to deduplicate rules.
 - The rule engine is O(n × m) where n = cards, m = rules. With 75 cards and 80 rules this is trivially fast. At 36k cards it's still < 0.1s.
 - Run the mechanical tagger again any time you add new patterns — the database stores tags with UPSERT, so re-running is always safe and always picks up new patterns.
+
+---
+
+## 2026-05-26 (continued) — Stage 3: Archetype Rule Engine + INSERT Safety Fix
+
+### What We Built
+
+Layer 4 archetype derivation: 50+ rules mapping mechanical tag combinations to archetype tags. 111 new archetype tag-card pairs applied without touching any of the 155 existing manual tags.
+
+Key archetypes populated by rules: Aristocrats (48 total), Sacrifice (34), Graveyard (26), Reanimator (25), Control (16), Tokens (11), Big_Mana (9), Lifegain (4), Devotion (4), Voltron (3), Stax (2), Discard (1).
+
+---
+
+### Critical Bug: INSERT OR REPLACE Destroys Manual Tags
+
+**Problem discovered during design:** The existing `tag_card()` used `INSERT OR REPLACE INTO card_tags`. In SQLite, `INSERT OR REPLACE` is equivalent to `DELETE + INSERT`. This means:
+
+- Manual tag: Blood Artist, Aristocrats, confidence=1.0, source=manual
+- Rule engine fires: Blood Artist, Aristocrats, confidence=0.85, source=rule_engine
+- `INSERT OR REPLACE` deletes the manual row and inserts the rule_engine row
+- Result: manual 1.0 silently downgraded to 0.85
+
+This would have corrupted all 155 manual archetype tags.
+
+**Fix:** `tag_card_if_higher()` — a new database method that uses `INSERT ... ON CONFLICT ... DO UPDATE SET` with a CASE expression:
+
+```sql
+INSERT INTO card_tags (card_id, tag_id, confidence, source, note)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(card_id, tag_id) DO UPDATE SET
+    confidence = CASE
+        WHEN excluded.confidence > card_tags.confidence
+        THEN excluded.confidence ELSE card_tags.confidence END,
+    source = CASE
+        WHEN excluded.confidence > card_tags.confidence
+        THEN excluded.source ELSE card_tags.source END
+```
+
+This is available in SQLite 3.24+ (2018) — safe for Python 3.8+.
+
+**Rule:** `tag_card()` is for deliberate writes (regex tagging, manual assignment). `tag_card_if_higher()` is for all rule-engine derivations. Never use `tag_card()` in an automated pipeline that runs after human tagging.
+
+---
+
+### Archetype Layer vs. Functional Layer: Different Design Choices
+
+**Functional rules** could take mechanical OR functional tags as input — either worked.
+**Archetype rules** should take **mechanical tags only**.
+
+Why: Functional tags (`Payoff`, `Engine`) are too generic for archetype inference. `Payoff` alone doesn't tell you whether the card belongs in Aristocrats, Big_Mana, or Devotion. Mechanical tags (`Death_Trigger + Life_Drain`) encode the specific strategic signal precisely.
+
+The general principle: each rule layer should receive the most specific, reliable input available. Abstractions are useful for humans but lose the fine-grained signals that rule engines need.
+
+---
+
+### Archetype Coverage Is Not 100% by Design
+
+Generic staples (Sol Ring, Arcane Signet, Demonic Tutor) fit every strategy and belong to none specifically. **They intentionally get zero archetype tags from rules.** Their existing manual archetype tags (assigned by a human in the context of "this card is in my aristocrats deck") are preserved.
+
+This is the right design. A tag that says "this card specifically serves this strategy" is only useful when it's discriminating. If every black card is tagged Aristocrats, the tag means nothing.
+
+---
+
+### Stax and Voltron are Edge Cases
+
+- **Stax** (2 cards): Braids and Sheoldred both have `Forced_Sacrifice + Upkeep_Trigger`. Both force opponent choices every upkeep — that IS stax, even if the deck doesn't lean into it intentionally.
+- **Voltron** (3 cards): Lashwrithe (scales with lands, for equipping a commander), Swiftfoot Boots (commander protection), Yahenni (grows indefinitely, has indestructible). All are correct at their confidence levels.
+
+Don't be afraid of small numbers. 2 Stax cards means "your deck has a stax element." That's accurate.
+
+---
+
+### Small Advice
+
+- Check for `INSERT OR REPLACE` in any database layer where data provenance matters. "Last write wins" is a footgun when multiple systems write to the same row.
+- Before implementing a new derivation layer, audit what already exists in the database. You might have ground truth (manual tags) that the automated layer must not overwrite.
+- When a rule fires on a "wrong" card (Protection_Effect → Voltron for Yahenni), check the confidence. 0.55 says "plausible but not confident." That's the right answer — Yahenni CAN be Voltron but isn't primarily.

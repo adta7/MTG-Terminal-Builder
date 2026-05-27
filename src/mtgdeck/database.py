@@ -439,6 +439,56 @@ class Database:
         self.conn.commit()
         return True
 
+    def tag_card_if_higher(
+        self,
+        card_name: str,
+        tag_name: str,
+        confidence: float = 1.0,
+        source: str = "rule_engine",
+        note: str = "",
+    ) -> bool:
+        """
+        Tag a card only when the new confidence is strictly higher than the existing.
+
+        Use this for rule-engine derived tags (functional, archetype) to ensure
+        that manual tags (source='manual', confidence=1.0) are never downgraded
+        by an automated inference.
+
+        Returns True if the tag was applied or already existed, False if tag not found.
+        """
+        tag_id = self.get_tag_id(tag_name)
+        if tag_id is None:
+            return False
+        cur = self.conn.cursor()
+        # SQLite upsert: insert if absent, update only when new confidence is higher.
+        # The CASE expression compares excluded.confidence (the incoming value)
+        # against the stored confidence; if the incoming is higher, update all fields.
+        cur.execute(
+            """
+            INSERT INTO card_tags (card_id, tag_id, confidence, source, note)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(card_id, tag_id) DO UPDATE SET
+                confidence = CASE
+                    WHEN excluded.confidence > card_tags.confidence
+                    THEN excluded.confidence
+                    ELSE card_tags.confidence
+                END,
+                source = CASE
+                    WHEN excluded.confidence > card_tags.confidence
+                    THEN excluded.source
+                    ELSE card_tags.source
+                END,
+                note = CASE
+                    WHEN excluded.confidence > card_tags.confidence
+                    THEN excluded.note
+                    ELSE card_tags.note
+                END
+            """,
+            (card_name, tag_id, confidence, source, note or ""),
+        )
+        self.conn.commit()
+        return True
+
     def get_card_tags(self, card_name: str, layer: Optional[str] = None) -> List[dict]:
         """
         Get all tags for a card, optionally filtered by layer.

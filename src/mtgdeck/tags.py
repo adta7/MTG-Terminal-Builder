@@ -719,6 +719,103 @@ def tag_mechanical(card: Card, db) -> list[str]:
     return list(dict.fromkeys(applied))
 
 
+ARCHETYPE_RULES: list[tuple[frozenset, str, float]] = [
+
+    # ── Aristocrats ──────────────────────────────────────────────────────────
+    # Sacrifice-based strategies that profit from creature deaths.
+    # High-confidence rules require the specific death-payoff combination.
+    (frozenset({"Death_Trigger", "Life_Drain"}),                  "Aristocrats", 0.90),
+    (frozenset({"Death_Trigger", "Life_Gain"}),                   "Aristocrats", 0.85),
+    (frozenset({"Death_Trigger", "Draw_Effect"}),                 "Aristocrats", 0.80),
+    (frozenset({"Death_Trigger", "Mana_Production"}),             "Aristocrats", 0.80),
+    (frozenset({"Sacrifice_Outlet", "Death_Trigger"}),            "Aristocrats", 0.90),
+    (frozenset({"Forced_Sacrifice", "Death_Trigger"}),            "Aristocrats", 0.85),
+    (frozenset({"Token_Generation", "Death_Trigger"}),            "Aristocrats", 0.80),
+    (frozenset({"Repeatable_Token_Generation", "Death_Trigger"}), "Aristocrats", 0.85),
+    (frozenset({"Return_Self_From_Graveyard"}),                   "Aristocrats", 0.80),
+    (frozenset({"Undying_Persist"}),                              "Aristocrats", 0.75),
+    (frozenset({"Scales_With_Deaths"}),                           "Aristocrats", 0.75),
+    (frozenset({"Sacrifice_Outlet"}),                             "Aristocrats", 0.65),
+
+    # ── Sacrifice ────────────────────────────────────────────────────────────
+    # Strategies centered on sacrificing permanents for value.
+    # Broader than Aristocrats — no requirement for death payoffs.
+    (frozenset({"Sacrifice_Outlet"}),                             "Sacrifice", 0.80),
+    (frozenset({"Forced_Sacrifice"}),                             "Sacrifice", 0.75),
+    (frozenset({"Sacrifice_Outlet", "Token_Generation"}),         "Sacrifice", 0.85),
+    (frozenset({"Sacrifice_Outlet", "Mana_Production"}),          "Sacrifice", 0.80),
+
+    # ── Reanimator ───────────────────────────────────────────────────────────
+    # Strategies that reanimate large creatures from the graveyard.
+    (frozenset({"Reanimation"}),                                  "Reanimator", 0.90),
+    (frozenset({"Mass_Reanimate"}),                               "Reanimator", 0.95),
+    (frozenset({"Self_Mill"}),                                    "Reanimator", 0.65),
+    (frozenset({"Looting_Effect"}),                               "Reanimator", 0.60),
+
+    # ── Graveyard ────────────────────────────────────────────────────────────
+    # Any strategy that uses the graveyard as a resource.
+    # Broader than Reanimator — includes self-mill, recursion, and GY interaction.
+    (frozenset({"Reanimation"}),                                  "Graveyard", 0.85),
+    (frozenset({"Mass_Reanimate"}),                               "Graveyard", 0.90),
+    (frozenset({"Self_Mill"}),                                    "Graveyard", 0.80),
+    (frozenset({"Return_Self_From_Graveyard"}),                   "Graveyard", 0.80),
+    (frozenset({"Recursion_To_Hand"}),                            "Graveyard", 0.75),
+    (frozenset({"Looting_Effect"}),                               "Graveyard", 0.70),
+    (frozenset({"Scales_With_Deaths"}),                           "Graveyard", 0.70),
+    (frozenset({"Graveyard_Hate"}),                               "Graveyard", 0.65),
+
+    # ── Big_Mana ─────────────────────────────────────────────────────────────
+    # Strategies that generate large mana pools for X-spells or massive threats.
+    (frozenset({"Mana_Multiplier"}),                              "Big_Mana", 0.90),
+    (frozenset({"X_Spell_Effect", "Life_Drain"}),                 "Big_Mana", 0.90),
+    (frozenset({"X_Spell_Effect"}),                               "Big_Mana", 0.80),
+    (frozenset({"Scales_With_Deaths", "Mana_Production"}),        "Big_Mana", 0.80),
+    (frozenset({"Permanent_Scaling", "Mana_Production"}),         "Big_Mana", 0.75),
+    (frozenset({"Cost_Reduction"}),                               "Big_Mana", 0.70),
+
+    # ── Devotion ─────────────────────────────────────────────────────────────
+    # Strategies that benefit from many colored mana symbols among permanents.
+    (frozenset({"Devotion_Effect"}),                              "Devotion", 0.95),
+
+    # ── Tokens ───────────────────────────────────────────────────────────────
+    # Strategies that create and exploit many tokens.
+    (frozenset({"Repeatable_Token_Generation"}),                  "Tokens", 0.90),
+    (frozenset({"Token_Generation", "Death_Trigger"}),            "Tokens", 0.80),
+    (frozenset({"Token_Generation", "Sacrifice_Outlet"}),         "Tokens", 0.75),
+
+    # ── Lifegain ─────────────────────────────────────────────────────────────
+    # Strategies built around gaining and leveraging life totals.
+    # Only the genuinely life-gain-centric combinations — Extort is excluded
+    # (incidental drain, not a lifegain strategy card).
+    (frozenset({"Life_Drain", "Devotion_Effect"}),                "Lifegain", 0.80),
+    (frozenset({"Life_Drain", "X_Spell_Effect"}),                 "Lifegain", 0.75),
+    (frozenset({"Lifelink"}),                                     "Lifegain", 0.65),
+
+    # ── Control ──────────────────────────────────────────────────────────────
+    # Reactive strategies that answer threats and maintain board control.
+    (frozenset({"Counter_Spell"}),                                "Control", 0.90),
+    (frozenset({"Targeted_Removal"}),                             "Control", 0.75),
+    (frozenset({"Board_Wipe"}),                                   "Control", 0.70),
+    (frozenset({"Graveyard_Hate"}),                               "Control", 0.75),
+
+    # ── Discard ──────────────────────────────────────────────────────────────
+    # Strategies built around making opponents discard.
+    # Only fires on compound signals — Discard_Effect alone is too broad.
+    (frozenset({"Discard_Effect", "Upkeep_Trigger"}),             "Discard", 0.75),
+    (frozenset({"Discard_Effect", "Forced_Sacrifice"}),           "Discard", 0.70),
+
+    # ── Stax ─────────────────────────────────────────────────────────────────
+    # Resource denial strategies that lock opponents out over time.
+    (frozenset({"Forced_Sacrifice", "Upkeep_Trigger"}),           "Stax", 0.75),
+
+    # ── Voltron ──────────────────────────────────────────────────────────────
+    # Commander damage strategies that buff a single creature.
+    # Low confidence — many equipment and buffs serve multiple strategies.
+    (frozenset({"Permanent_Scaling", "Evasion"}),                 "Voltron", 0.70),
+    (frozenset({"Protection_Effect"}),                            "Voltron", 0.55),
+]
+
+
 def tag_functional_from_rules(card_name: str, db) -> list[str]:
     """
     Derive functional tags (Layer 3) from a card's mechanical tags using FUNCTIONAL_RULES.
@@ -751,12 +848,60 @@ def tag_functional_from_rules(card_name: str, db) -> list[str]:
             if confidence > best_confidence.get(functional_tag, 0.0):
                 best_confidence[functional_tag] = confidence
 
-    # Apply all derived functional tags to the database.
+    # Apply all derived functional tags.
+    # Use tag_card_if_higher so that an existing manual tag (confidence=1.0)
+    # is never downgraded by a rule-engine inference (confidence < 1.0).
     applied = []
     for functional_tag, confidence in best_confidence.items():
-        success = db.tag_card(card_name, functional_tag, confidence, source="rule_engine")
+        success = db.tag_card_if_higher(card_name, functional_tag, confidence, source="rule_engine")
         if success:
             applied.append(functional_tag)
+
+    return applied
+
+
+def tag_archetype_from_rules(card_name: str, db) -> list[str]:
+    """
+    Derive archetype tags (Layer 4) from a card's mechanical tags using ARCHETYPE_RULES.
+
+    Rules use mechanical tags only (Layer 2) as input — not functional tags.
+    Mechanical tags encode the exact archetype-specific signals (Death_Trigger,
+    Mana_Multiplier, etc.) without the abstraction noise of functional labels.
+
+    Safe to call multiple times — uses tag_card_if_higher so existing manual
+    tags (confidence=1.0) are never downgraded by a rule-engine inference.
+
+    Args:
+        card_name: exact card name (must have mechanical tags in the database)
+        db:        open Database connection
+
+    Returns:
+        List of archetype tag names that were newly applied or updated.
+
+    Usage:
+        card = db.card_by_name("Blood Artist")
+        tag_mechanical(card, db)                # Layer 2 first
+        tag_functional_from_rules(card_name, db) # Layer 3 second (optional before Layer 4)
+        tag_archetype_from_rules(card_name, db)  # → ["Aristocrats", "Sacrifice"]
+    """
+    mech_tags = {t["name"] for t in db.get_card_tags(card_name, layer="mechanical")}
+
+    if not mech_tags:
+        return []
+
+    # Collect highest confidence for each archetype tag that fires.
+    best_confidence: dict[str, float] = {}
+    for required, archetype_tag, confidence in ARCHETYPE_RULES:
+        if required.issubset(mech_tags):
+            if confidence > best_confidence.get(archetype_tag, 0.0):
+                best_confidence[archetype_tag] = confidence
+
+    # Apply derived archetype tags, never downgrading existing manual tags.
+    applied = []
+    for archetype_tag, confidence in best_confidence.items():
+        success = db.tag_card_if_higher(card_name, archetype_tag, confidence, source="rule_engine")
+        if success:
+            applied.append(archetype_tag)
 
     return applied
 

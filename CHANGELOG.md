@@ -5,6 +5,23 @@ Format: [Version] — Date — Description
 
 ---
 
+## [2.6.0] — 2026-05-26
+
+### Added
+- `src/mtgdeck/database.py` — `tag_card_if_higher()`: upsert that only updates when new confidence is strictly higher than existing; protects manual tags (confidence=1.0) from rule-engine downgrades
+- `src/mtgdeck/tags.py` — `ARCHETYPE_RULES`: 50+ inference rules mapping mechanical tag combinations to archetype tags; mechanical-layer input only (no functional-layer noise)
+- `src/mtgdeck/tags.py` — `tag_archetype_from_rules(card_name, db)`: derives Layer 4 archetype tags from Layer 2 mechanical tags; 111 new archetype tag-card pairs applied
+- `tests/test_tags.py` — 28 new tests: `TestTagCardIfHigher` (5 tests) and `TestTagArchetypeFromRules` (23 tests); 170 total
+
+### Changed
+- `src/mtgdeck/tags.py` — `tag_functional_from_rules()` now uses `tag_card_if_higher()` instead of `tag_card()` — defensive fix so future manual functional tags are never downgraded by the rule engine
+- `data/cards.sqlite` — Archetype layer populated: Aristocrats (48 cards), Sacrifice (34), Graveyard (26), Reanimator (25), Control (16), Tokens (11), Big_Mana (9), Lifegain (4), Devotion (4), Voltron (3), Stax (2), Discard (1)
+
+### Fixed
+- `src/mtgdeck/database.py` — `tag_card()` previously used `INSERT OR REPLACE` which would silently overwrite a manual tag (confidence=1.0) with a lower rule-engine confidence; `tag_card_if_higher()` corrects this for all rule-engine derivations
+
+---
+
 ## [2.5.0] — 2026-05-26
 
 ### Added
