@@ -588,3 +588,133 @@ cp oracle-cards-*.json .claude/worktrees/abc123/
 1. Copy shared files (like Scryfall JSON) into the worktree
 2. Update find functions to search `../../` if needed
 3. Use symlinks from parent to worktree
+
+---
+
+## 2026-05-26 (continued) — Stage 1: Mechanical Pattern Engine
+
+### What We Built
+
+Expanded the mechanical auto-tagger from 26 to 35 tags with 113 tests. Every tag now has:
+- At least one positive match test (should fire)
+- At least one negative match test (should NOT fire)
+
+**Final coverage:** 166 tag-card pairs across 76 deck cards.
+
+---
+
+### Regex Design for Oracle Text Matching
+
+**Start precise, then soften.** Begin with the exact known phrase, then generalize only when you discover a miss. Too-broad patterns cause false positives that corrupt downstream layers.
+
+Example — Targeted Removal started as:
+```python
+r"destroy target creature"        # misses "destroy target nonblack creature"
+```
+Became:
+```python
+r"destroy target (?:\w+ )?(?:creature|permanent|artifact|enchantment|planeswalker)"
+```
+The `(?:\w+ )?` allows one optional qualifier word (nonblack, tapped, nonartifact) without breaking the specificity.
+
+**Use `\b` for keyword matching.** Checking `r"\bflying\b"` is safe in MTG oracle text because "flying" only ever appears as a keyword. Without `\b`, "flyingcolors" would match.
+
+**Use `(?:…)?` for optional clauses.** Living Death says "puts all cards they exiled" with `all cards` directly adjacent. The original pattern had `.{1,40}` (requiring ≥1 chars) and missed it. Changed to `.{0,40}` (zero or more).
+
+**Oracle text modernization matters.** Scryfall standardized self-recursion in post-2022 oracle updates:
+- Old: `"Return Reassembling Skeleton from your graveyard to the battlefield tapped"`
+- New: `"Return this card from your graveyard to the battlefield tapped"`
+
+Pattern `r"return this card from your graveyard"` now catches every self-recursive card cleanly without naming each one.
+
+---
+
+### Confidence Values Are Not Decoration
+
+Every pattern has a confidence value (0.0–1.0). Use it deliberately:
+
+| Confidence | When to use |
+|---|---|
+| 1.0 | Mechanically certain — oracle text is explicit and unambiguous |
+| 0.9–0.95 | Strong signal — matches the exact mechanism but may have edge cases |
+| 0.85 | Good match — common phrasing, very few false positives expected |
+| 0.8 | Reasonable — broader pattern, some interpretive overlap |
+
+Lower confidence isn't "bad" — it's honest about what you know. The rule engine uses confidence to weight its inferences.
+
+---
+
+### Layered Tagging Architecture
+
+The five-layer ontology works because each layer answers a different question:
+
+| Layer | Question | Example |
+|---|---|---|
+| Mechanical | What does the card literally do? | `Death_Trigger` |
+| Functional | What role does it play in a deck? | `Payoff` |
+| Archetype | What strategy wants it? | `Aristocrats` |
+| Emotional | What is its strategic identity? | `Engine_Core` |
+
+**Never conflate layers.** `Sacrifice_Outlet` (mechanical) and `Engine` (functional) are different things. A card can be a Sacrifice_Outlet without being an Engine — if it sacs but provides no ongoing value, it's just a Sacrifice_Outlet.
+
+**Mechanical is objective. Functional is contextual.** A card can be a Sacrifice_Outlet in one deck and pure Fuel in another. Mechanical tags are always true; functional tags depend on the deck.
+
+---
+
+### Side-by-Side Terminal Layout with ANSI
+
+Rich's markup system doesn't support mixing with raw `print()` easily. When you need to build a side-by-side layout (card frame + tag column), extract each side as a `list[str]` and zip them:
+
+```python
+card_lines = _build_card_lines(card)    # list of raw strings, fixed width
+tag_lines  = _build_tag_right_lines(card_name)  # list of ANSI-colored strings
+
+GAP = "   "
+card_w = len(card_lines[0]) if card_lines else 0
+max_rows = max(len(card_lines), len(tag_lines))
+
+for i in range(max_rows):
+    left  = card_lines[i] if i < len(card_lines) else " " * card_w
+    right = tag_lines[i]  if i < len(tag_lines)  else ""
+    print(left + GAP + right)
+```
+
+Use `\033[36m` style ANSI codes directly in the tag column strings — Rich's console.print would interfere with the fixed-width alignment.
+
+**ANSI color constants:**
+- `\033[36m` — cyan (mechanical)
+- `\033[32m` — green (functional)
+- `\033[33m` — yellow (archetype)
+- `\033[35m` — magenta (emotional)
+- `\033[2m` — dim
+- `\033[0m` — reset (always needed at end of colored string)
+
+---
+
+### Test Design for Pattern Matching
+
+Pattern tests should be isolated from the database. Each test class:
+1. Creates a minimal Card object with crafted oracle text
+2. Calls `tag_mechanical(card, db)` against an in-memory DB
+3. Asserts the tag is (or is not) in the result list
+
+```python
+def _make_card(name, oracle_text=""):
+    return Card(name=name, mana_cost="", cmc=0, type_line="Creature",
+                oracle_text=oracle_text)
+
+def test_swampwalk_evasion(db):
+    card = _make_card("Sheoldred", "Swampwalk\nWhen this enters...")
+    assert "Evasion" in tags.tag_mechanical(card, db)
+```
+
+**Always include the negative test.** If you only test "does it fire", you won't catch patterns that are too broad and fire on everything. The negative test is where you catch false positives.
+
+---
+
+### Small Advice
+
+- When you add a new regex pattern, immediately test it against 3 cards: one that should match, one that shouldn't, and one edge case.
+- `re.search(pattern, oracle.lower())` — always lowercase the oracle text. Scryfall uses mixed case but patterns are case-insensitive.
+- "Looting" (draw-then-discard) is different from "discard as a cost then draw." Check for `then discard` vs `discard [cost] ... draw`. These have very different strategic implications.
+- Adding a tag only costs a few lines. The cost of a missing tag is silent incorrect analysis downstream. When in doubt, add it.
