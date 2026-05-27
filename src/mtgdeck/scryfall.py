@@ -22,9 +22,10 @@ def find_scryfall_json(search_dir: Optional[str] = None) -> str:
     """
     Locate the Scryfall oracle cards JSON file.
 
-    Searches for files matching patterns:
-      - oracle-cards*.json
-      - *.json (if no oracle-cards found, takes first *.json)
+    Searches for files matching patterns (Scryfall uses various naming):
+      - oracle-card*.json (Scryfall's actual naming)
+      - oracle-cards*.json (alternative naming)
+      - *.json (fallback: takes first .json file)
 
     Args:
         search_dir: Directory to search (default: current dir)
@@ -36,18 +37,26 @@ def find_scryfall_json(search_dir: Optional[str] = None) -> str:
         FileNotFoundError: If no suitable JSON found
     """
     search_dir = search_dir or "."
-    files = list(Path(search_dir).glob("oracle-cards*.json"))
 
+    # Try exact Scryfall naming (oracle-card-*.json)
+    files = list(Path(search_dir).glob("oracle-card*.json"))
     if files:
         return str(files[0])
 
-    files = list(Path(search_dir).glob("*.json"))
+    # Try alternative naming (oracle-cards*.json)
+    files = list(Path(search_dir).glob("oracle-cards*.json"))
+    if files:
+        return str(files[0])
+
+    # Fallback: any .json file (but exclude package metadata)
+    files = [f for f in Path(search_dir).glob("*.json")
+             if "egg-info" not in str(f) and "pycache" not in str(f)]
     if files:
         return str(files[0])
 
     raise FileNotFoundError(
         f"No Scryfall JSON found in {search_dir}. "
-        "Expected: oracle-cards-*.json or *.json"
+        "Expected: oracle-card*.json or oracle-cards*.json"
     )
 
 

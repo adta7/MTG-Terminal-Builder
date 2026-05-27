@@ -569,3 +569,22 @@ Dataclasses enable IDE autocomplete, type checking, and catch bugs early.
 - Also enables `python -m pytest` without cd'ing
 
 Should have done this from the start.
+
+### Worktree Setup: File Location Matters
+
+When working in a git worktree (`.claude/worktrees/`), paths are relative to the worktree root, NOT the parent repo.
+
+**Problem:** Scryfall JSON was in `/repo/oracle-cards-*.json` but the worktree was at `/repo/.claude/worktrees/abc123/`.
+The `find_scryfall_json()` function looked in the worktree directory and didn't find it.
+
+**Solution:** Copy the file into the worktree:
+```bash
+cp oracle-cards-*.json .claude/worktrees/abc123/
+```
+
+**Why it matters:** When you `cd` into a worktree, `./data/` means the worktree's data dir, not the parent repo's. `Path(".").glob()` searches the current working directory. Being off by one level breaks file discovery.
+
+**Lesson:** When using worktrees, either:
+1. Copy shared files (like Scryfall JSON) into the worktree
+2. Update find functions to search `../../` if needed
+3. Use symlinks from parent to worktree
