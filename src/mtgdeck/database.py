@@ -182,8 +182,8 @@ class Database:
         # Stores evidence for every tag assignment to enable debugging and observability.
         # card_tags is the cache/summary; this table explains the reasoning.
         #
-        # NOTE: run_id is optional (can be NULL). When provided, it references tagger_runs,
-        # but we allow NULL for ad-hoc tagging operations that don't start a formal run.
+        # run_id is optional (can be NULL). When provided, it references tagger_runs for audit trail.
+        # SQLite allows NULL values in foreign key columns, so NULL is safe here.
         cur.execute("""
             CREATE TABLE IF NOT EXISTS tag_evidence (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -201,7 +201,8 @@ class Database:
                 source TEXT DEFAULT 'manual',
                 run_id TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(tag_id) REFERENCES tags(id)
+                FOREIGN KEY(tag_id) REFERENCES tags(id),
+                FOREIGN KEY(run_id) REFERENCES tagger_runs(run_id)
             )
         """)
 
