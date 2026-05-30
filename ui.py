@@ -287,12 +287,12 @@ def getch() -> str:
 
         if ch == b'\x1b':
             # ESC: check if this is an arrow key sequence or standalone ESC
-            # Use a short timeout (50ms) for continuation bytes only
-            if select.select([sys.stdin], [], [], 0.05)[0]:
+            # Use 200ms timeout for continuation bytes (allows inter-byte delays)
+            if select.select([sys.stdin], [], [], 0.2)[0]:
                 ch2 = sys.stdin.buffer.read(1)
                 if ch2 == b'[':
                     # Check for arrow key continuation
-                    if select.select([sys.stdin], [], [], 0.05)[0]:
+                    if select.select([sys.stdin], [], [], 0.2)[0]:
                         ch3 = sys.stdin.buffer.read(1)
                         if ch3 == b'A':
                             return 'UP'
