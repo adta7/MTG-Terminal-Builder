@@ -122,6 +122,9 @@ class Database:
         old_columns = {row[1] for row in cur.fetchall()}
         if "role" in old_columns or "strength" in old_columns:
             cur.execute("DROP TABLE card_tags")
+        elif "card_id" in old_columns and "card_name" not in old_columns:
+            # Rename card_id → card_name (schema alignment with tag_evidence)
+            cur.execute("ALTER TABLE card_tags RENAME COLUMN card_id TO card_name")
 
         # Card tags: card-to-tag relationships with confidence (phase 2)
         # confidence: 0.0-1.0 scale
@@ -257,6 +260,47 @@ class Database:
         cur = self.conn.cursor()
         cur.execute("SELECT name FROM cards ORDER BY name")
         return [row[0] for row in cur.fetchall()]
+
+    # ─── Collection operations ────────────────────────────────────────────────
+
+    def upsert_collection(
+        self,
+        card_name: str,
+        quantity: int = 1,
+        foil_quantity: int = 0,
+        set_code: str = "",
+    ) -> None:
+        """Insert or update a collection entry. Aggregates quantity on conflict."""
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO collection (card_name, quantity, foil, set_code)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(card_name, set_code) DO UPDATE SET
+                quantity = quantity + excluded.quantity,
+                foil     = foil + excluded.foil
+            """,
+            (card_name, quantity, foil_quantity, set_code),
+        )
+        self.conn.commit()
+
+    def collection_cards(self) -> List[Card]:
+        """Return Card objects for all cards in the collection."""
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT c.* FROM cards c
+            JOIN collection col ON LOWER(c.name) = LOWER(col.card_name)
+            ORDER BY c.name
+            """
+        )
+        return [self._row_to_card(row) for row in cur.fetchall()]
+
+    def collection_count(self) -> int:
+        """Number of unique card names in the collection."""
+        cur = self.conn.cursor()
+        cur.execute("SELECT COUNT(DISTINCT card_name) FROM collection")
+        return cur.fetchone()[0]
 
     def insert_card(self, card: Card) -> int:
         """Insert or replace a card. Returns card id."""
