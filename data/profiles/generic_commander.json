@@ -1,0 +1,14 @@
+{
+  "name": "Generic Commander",
+  "description": "Baseline targets for any 100-card Commander deck. Ranges are intentionally wide — use a deck-specific profile for tighter guidance.",
+  "targets": {
+    "lands":          [33, 38],
+    "ramp":           [8, 14],
+    "draw":           [8, 14],
+    "removal":        [6, 12],
+    "board_wipes":    [2, 5],
+    "protection":     [2, 6],
+    "wincons":        [3, 8],
+    "avg_mana_value": [2.5, 4.0]
+  }
+}

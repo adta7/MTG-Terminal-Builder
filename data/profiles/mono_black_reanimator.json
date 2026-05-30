@@ -1,0 +1,24 @@
+{
+  "name": "Mono Black Reanimator",
+  "description": "100-card Commander deck built around reanimating large threats. Sheoldred-style: heavy graveyard, sacrifice engines, X-spell finishers, drain payoffs. Recursive midrange / pressure-engine mono-black.",
+  "targets": {
+    "lands":          [35, 37],
+    "ramp":           [10, 13],
+    "draw":           [10, 14],
+    "removal":        [10, 16],
+    "board_wipes":    [2, 4],
+    "reanimation":    [12, 18],
+    "sac_outlets":    [7, 12],
+    "protection":     [3, 6],
+    "graveyard_fill": [5, 9],
+    "wincons":        [4, 7],
+    "avg_mana_value": [2.8, 3.8],
+    "pressure_pieces":  [8, 14],
+    "conversion_cards": [6, 10],
+    "engine_core":      [6, 10],
+    "recursive_fuel":   [5, 9],
+    "apex_threats":     [5, 8],
+    "identity_cards":   [3, 6],
+    "mana_payoffs":     [4, 8]
+  }
+}
