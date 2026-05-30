@@ -277,9 +277,8 @@ def getch() -> str:
     try:
         tty.setraw(fd)
 
-        # Wait for first byte with select (0.5 second timeout for responsiveness)
-        if not select.select([sys.stdin], [], [], 0.5)[0]:
-            return None
+        # Block until input is ready (no timeout - we want responsive input, not periodic re-renders)
+        select.select([sys.stdin], [], [])
 
         ch = sys.stdin.buffer.read(1)
         if ch == b'\x03':
