@@ -166,6 +166,56 @@ class Database:
             )
         """)
 
+        # Tagger runs: audit trail for tagging operations
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS tagger_runs (
+                run_id TEXT PRIMARY KEY,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                tagger_version TEXT,
+                rules_version TEXT,
+                card_scope TEXT,
+                notes TEXT
+            )
+        """)
+
+        # Tag evidence: source of truth for why tags exist (phase 2.5)
+        # Stores evidence for every tag assignment to enable debugging and observability.
+        # card_tags is the cache/summary; this table explains the reasoning.
+        #
+        # NOTE: run_id is optional (can be NULL). When provided, it references tagger_runs,
+        # but we allow NULL for ad-hoc tagging operations that don't start a formal run.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS tag_evidence (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                card_id TEXT NOT NULL,
+                tag_id INTEGER NOT NULL,
+                rule_id TEXT,
+                evidence_text TEXT,
+                oracle_start INTEGER,
+                oracle_end INTEGER,
+                face_index INTEGER,
+                segment_id TEXT,
+                ability_kind TEXT,
+                text_role TEXT,
+                confidence REAL DEFAULT 1.0,
+                source TEXT DEFAULT 'manual',
+                run_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(tag_id) REFERENCES tags(id)
+            )
+        """)
+
+        # Index for evidence queries
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_tag_evidence_card_tag
+            ON tag_evidence(card_id, tag_id)
+        """)
+
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_tag_evidence_rule_id
+            ON tag_evidence(rule_id)
+        """)
+
         self.conn.commit()
 
     # ─── Card operations ──────────────────────────────────────────────────────
@@ -715,6 +765,139 @@ class Database:
             }
             for row in cur.fetchall()
         ]
+
+    # ─── Tag Evidence (Phase 2.5) ─────────────────────────────────────────────────
+
+    def start_tagger_run(
+        self,
+        run_id: str,
+        tagger_version: str = "unknown",
+        rules_version: str = "unknown",
+        card_scope: str = "all",
+        notes: str = "",
+    ) -> bool:
+        """
+        Begin a tagger run. Call this before emitting evidence for a batch of cards.
+
+        Returns True if successful.
+        """
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO tagger_runs (run_id, timestamp, tagger_version, rules_version, card_scope, notes)
+            VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?, ?)
+            """,
+            (run_id, tagger_version, rules_version, card_scope, notes or ""),
+        )
+        self.conn.commit()
+        return True
+
+    def emit_tag_evidence(
+        self,
+        card_name: str,
+        tag_name: str,
+        rule_id: str = "",
+        evidence_text: str = "",
+        oracle_start: Optional[int] = None,
+        oracle_end: Optional[int] = None,
+        face_index: Optional[int] = None,
+        segment_id: str = "",
+        ability_kind: str = "",
+        text_role: str = "",
+        confidence: float = 1.0,
+        source: str = "manual",
+        run_id: str = "",
+    ) -> bool:
+        """
+        Emit evidence for a tag assignment and update card_tags.
+
+        This is the primary method for recording WHY a tag exists.
+
+        Args:
+            card_name: Card name
+            tag_name: Tag name (must exist in tags table)
+            rule_id: Unique identifier for the rule that produced this tag
+            evidence_text: The exact oracle text span that triggered this tag
+            oracle_start: Character offset in oracle text (if known)
+            oracle_end: Character offset in oracle text (if known)
+            face_index: Card face index (0 for front, 1 for back, None for single-face)
+            segment_id: Arbitrary segment identifier (e.g., "activated_ability_1")
+            ability_kind: "activated", "triggered", "static", "replacement", or ""
+            text_role: "cost", "effect", "trigger", or ""
+            confidence: 0.0-1.0 scale
+            source: "manual", "regex", "rule_engine"
+            run_id: Tagger run ID for tracking
+
+        Returns True if successful, False if tag not found.
+        """
+        tag_id = self.get_tag_id(tag_name)
+        if tag_id is None:
+            return False
+
+        cur = self.conn.cursor()
+
+        # Emit evidence
+        cur.execute(
+            """
+            INSERT INTO tag_evidence (
+                card_id, tag_id, rule_id, evidence_text,
+                oracle_start, oracle_end, face_index, segment_id,
+                ability_kind, text_role, confidence, source, run_id,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                card_name, tag_id, rule_id or "", evidence_text or "",
+                oracle_start, oracle_end, face_index, segment_id or "",
+                ability_kind or "", text_role or "", confidence, source, run_id or None,
+            ),
+        )
+
+        # Update card_tags as summary cache
+        # Use tag_card_if_higher to respect manual tag precedence
+        self.tag_card_if_higher(
+            card_name=card_name,
+            tag_name=tag_name,
+            confidence=confidence,
+            source=source,
+            note=f"rule_id={rule_id}" if rule_id else "",
+        )
+
+        self.conn.commit()
+        return True
+
+    def get_tag_evidence(self, card_name: str, tag_name: str = "") -> List[dict]:
+        """
+        Retrieve evidence for tags on a card.
+
+        Args:
+            card_name: Card name
+            tag_name: Optional filter to specific tag
+
+        Returns:
+            List of dicts with evidence details
+        """
+        cur = self.conn.cursor()
+        query = """
+            SELECT
+                te.id, te.card_id, t.name as tag_name, t.layer,
+                te.rule_id, te.evidence_text, te.oracle_start, te.oracle_end,
+                te.face_index, te.segment_id, te.ability_kind, te.text_role,
+                te.confidence, te.source, te.run_id, te.created_at
+            FROM tag_evidence te
+            JOIN tags t ON te.tag_id = t.id
+            WHERE LOWER(te.card_id) = LOWER(?)
+        """
+        params = [card_name]
+
+        if tag_name:
+            query += " AND LOWER(t.name) = LOWER(?)"
+            params.append(tag_name)
+
+        query += " ORDER BY te.created_at DESC"
+
+        cur.execute(query, params)
+        return [dict(row) for row in cur.fetchall()]
 
     # ─── Helpers ──────────────────────────────────────────────────────────────
 
