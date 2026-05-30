@@ -8,9 +8,12 @@ import sys
 import shutil
 from typing import Optional, List, Dict, Any
 
+from rich.console import Console
 from ui import BreadcrumbPath, clear_screen, getch, SessionState, restore_terminal, render_view_header, render_status_line
 from search import search_cards
 from renderers import render_card_preview, render_dual_panel, render_single_panel
+
+console = Console()
 
 
 def run_card_search_view(
@@ -67,8 +70,8 @@ def run_card_search_view(
             use_dual_panel = width >= 100
 
             if not search_results:
-                print("[yellow]No results.[/yellow]")
-                print("Press / to search again, or q to quit.")
+                console.print("[yellow]No results.[/yellow]")
+                console.print("Press / to search again, or ESC to quit.")
                 key = getch()
                 if key == '/' or key == 's':
                     # New search

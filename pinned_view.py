@@ -7,8 +7,11 @@ Displays pinned cards in a dual-panel layout with full card previews.
 import shutil
 from typing import Optional
 
+from rich.console import Console
 from ui import BreadcrumbPath, clear_screen, getch, SessionState, restore_terminal, render_view_header, render_status_line
 from renderers import render_card_preview, render_dual_panel, render_single_panel
+
+console = Console()
 
 
 def run_pinned_cards_view(session_state: SessionState) -> None:
@@ -38,10 +41,10 @@ def run_pinned_cards_view(session_state: SessionState) -> None:
             pinned = session_state.get_pinned_cards()
 
             if not pinned:
-                print("[yellow]No pinned cards yet.[/yellow]")
-                print("Pin cards from the search view by pressing 'p'.")
-                print()
-                print("Press q to return to menu.")
+                console.print("[yellow]No pinned cards yet.[/yellow]")
+                console.print("Pin cards from the search view by pressing 'p'.")
+                console.print()
+                console.print("Press ESC to return to menu.")
                 key = getch()
                 if key == 'q' or key == 'ESC':
                     return

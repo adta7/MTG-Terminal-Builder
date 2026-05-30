@@ -7,9 +7,12 @@ Shows past search queries and lets users replay them or review results.
 import shutil
 from typing import Dict, Any, List
 
+from rich.console import Console
 from ui import BreadcrumbPath, clear_screen, getch, SessionState, restore_terminal, render_view_header, render_status_line
 from renderers import render_dual_panel, render_single_panel
 from search_view import run_card_search_view
+
+console = Console()
 
 
 def run_history_view(scryfall_db: Dict[str, Any], session_state: SessionState) -> None:
@@ -40,10 +43,10 @@ def run_history_view(scryfall_db: Dict[str, Any], session_state: SessionState) -
             history = session_state.get_history()
 
             if not history:
-                print("[yellow]No search history yet.[/yellow]")
-                print("Search for cards to build history.")
-                print()
-                print("Press q to return to menu.")
+                console.print("[yellow]No search history yet.[/yellow]")
+                console.print("Search for cards to build history.")
+                console.print()
+                console.print("Press ESC to return to menu.")
                 key = getch()
                 if key == 'q' or key == 'ESC':
                     return
