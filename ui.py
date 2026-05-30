@@ -270,14 +270,15 @@ def getch() -> str:
     """Read a single keypress in raw mode.
 
     Handles arrow keys and ESC. Returns single character or special key string.
-    Uses select() to wait for first byte, then reads remaining bytes in blocking mode.
+    Blocks on first key, but uses a short timeout for escape sequence continuation
+    bytes to avoid blocking on standalone ESC presses.
     """
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     try:
         tty.setraw(fd)
 
-        # Block until input is ready (no timeout - we want responsive input, not periodic re-renders)
+        # Block until input is ready (no timeout - responsive input, not polling)
         select.select([sys.stdin], [], [])
 
         ch = sys.stdin.buffer.read(1)
@@ -285,18 +286,25 @@ def getch() -> str:
             raise KeyboardInterrupt
 
         if ch == b'\x1b':
-            # Read the next two bytes without timeout (escape sequences complete eventually)
-            ch2 = sys.stdin.buffer.read(1)
-            if ch2 == b'[':
-                ch3 = sys.stdin.buffer.read(1)
-                if ch3 == b'A':
-                    return 'UP'
-                if ch3 == b'B':
-                    return 'DOWN'
-                if ch3 == b'C':
-                    return 'RIGHT'
-                if ch3 == b'D':
-                    return 'LEFT'
+            # ESC: check if this is an arrow key sequence or standalone ESC
+            # Use a short timeout (50ms) for continuation bytes only
+            if select.select([sys.stdin], [], [], 0.05)[0]:
+                ch2 = sys.stdin.buffer.read(1)
+                if ch2 == b'[':
+                    # Check for arrow key continuation
+                    if select.select([sys.stdin], [], [], 0.05)[0]:
+                        ch3 = sys.stdin.buffer.read(1)
+                        if ch3 == b'A':
+                            return 'UP'
+                        if ch3 == b'B':
+                            return 'DOWN'
+                        if ch3 == b'C':
+                            return 'RIGHT'
+                        if ch3 == b'D':
+                            return 'LEFT'
+                # Unknown escape sequence - return ESC safely
+                return 'ESC'
+            # No continuation bytes - this was standalone ESC
             return 'ESC'
 
         return ch.decode('utf-8', errors='replace')
