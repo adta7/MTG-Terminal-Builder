@@ -165,6 +165,22 @@ def restore_terminal():
         pass  # Silently ignore errors during restoration
 
 
+def render_view_header(breadcrumb: BreadcrumbPath) -> str:
+    """Render a view header as plain text: breadcrumb + divider line.
+
+    Returns a string like:
+        MTG Pipeline › Card Search
+        ──────────────────────────
+
+    Uses plain text (no Rich markup) for reliable rendering across all terminals.
+    """
+    breadcrumb_text = breadcrumb.render()
+    # Replace " > " with " › " for cleaner look
+    breadcrumb_text = breadcrumb_text.replace(" > ", " › ")
+    divider = "─" * min(len(breadcrumb_text) + 4, 80)
+    return f"{breadcrumb_text}\n{divider}"
+
+
 def render_breadcrumb(path: BreadcrumbPath) -> str:
     """Render breadcrumb as a styled string."""
     breadcrumb_text = path.render()
@@ -173,16 +189,16 @@ def render_breadcrumb(path: BreadcrumbPath) -> str:
     return ""
 
 
-def render_status_line(keys: List[str]) -> str:
-    """Render a status line with available keybindings.
+def render_status_line(*parts: str) -> str:
+    """Render a status line from key/action pairs.
 
     Args:
-        keys: List of keybind descriptions, e.g. ["↑↓ Navigate", "Space Select"]
+        parts: Variable number of keybind descriptions, e.g. "↑↓ Navigate", "Enter Select"
 
     Returns:
-        Formatted status line string.
+        Formatted status line string joined with " · ".
     """
-    return " | ".join(keys)
+    return " · ".join(p for p in parts if p)
 
 
 def render_screen(
@@ -221,6 +237,32 @@ def render_screen(
         console.print()
         console.print(f"[dim]{footer}[/dim]")
 
+
+# ─── Navigation Contract ────────────────────────────────────────────────────────
+#
+# MAIN MENU:
+#   q                 — Quit the app
+#   Enter / number    — Select menu item
+#   ESC               — Re-prompt (does not exit app)
+#
+# INTERACTIVE SUBVIEWS (getch-based: Search, Pinned, History):
+#   ESC               — Return to main menu
+#   ↑↓ arrow keys     — Navigate lists
+#   Enter             — Select item (context-dependent)
+#   Specific keys     — p (pin), / (search), etc. (view-specific)
+#
+# BLOCKING INPUT VIEWS (input()-based: Deck Manager, Card Lookup, Pipeline):
+#   q, quit, back, or cancel  — Return to main menu (type on its own line)
+#   ESC                        — May not work cleanly in normal input()
+#
+# IMPORTANT:
+#   - In text input, typing "q" alone means back; "Queen" is just a card name.
+#   - ESC works cleanly in raw-mode interactive views but not in normal input().
+#   - Ctrl+C exits cleanly everywhere (try/finally + restore_terminal).
+#
+# Visual consistency:
+#   Every view displays its location via breadcrumb at the top.
+#   Every view shows available keys (status line) for its context.
 
 # ─── Interactive Menu ────────────────────────────────────────────────────────
 
@@ -347,14 +389,12 @@ def ask_choice_interactive(
                 console.print()
 
         # Status line
-        status = render_status_line([
+        status = render_status_line(
             "[bold cyan]↑↓[/bold cyan] Navigate",
             "[bold cyan]Enter[/bold cyan] Select",
             "[bold cyan]1-9[/bold cyan] Quick",
             "[dim cyan]q/ESC[/dim cyan] Back" if cancellable else "",
-        ])
-        # Filter out empty strings
-        status = " | ".join([s for s in status.split(" | ") if s])
+        )
         console.print(f"[dim]{status}[/dim]")
 
         # Wait for keypress

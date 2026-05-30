@@ -7,7 +7,7 @@ Displays pinned cards in a dual-panel layout with full card previews.
 import shutil
 from typing import Optional
 
-from ui import BreadcrumbPath, clear_screen, getch, SessionState, restore_terminal
+from ui import BreadcrumbPath, clear_screen, getch, SessionState, restore_terminal, render_view_header, render_status_line
 from renderers import render_card_preview, render_dual_panel, render_single_panel
 
 
@@ -31,10 +31,7 @@ def run_pinned_cards_view(session_state: SessionState) -> None:
 
         while True:
             clear_screen()
-
-            # Breadcrumb
-            breadcrumb_str = f"[dim cyan]{breadcrumb.render()}[/dim cyan]"
-            print(breadcrumb_str)
+            print(render_view_header(breadcrumb))
             print()
 
             # Get pinned cards
@@ -63,7 +60,7 @@ def run_pinned_cards_view(session_state: SessionState) -> None:
                 else:
                     preview_lines = ["(No card selected)"]
 
-                status_line = "↑↓ navigate · u unpin · q quit"
+                status = render_status_line("↑↓ navigate", "u unpin", "ESC back")
 
                 if use_dual_panel:
                     output = render_dual_panel(
@@ -73,7 +70,7 @@ def run_pinned_cards_view(session_state: SessionState) -> None:
                         right_title="Preview",
                         right_lines=preview_lines,
                         breadcrumb_str="",
-                        status_str=f"[dim]{status_line}[/dim]",
+                        status_str=f"[dim]{status}[/dim]",
                         width=width,
                         height=height,
                     )
@@ -83,7 +80,7 @@ def run_pinned_cards_view(session_state: SessionState) -> None:
                         items=card_names,
                         selected=selected_index,
                         breadcrumb_str="",
-                        status_str=f"[dim]{status_line}[/dim]",
+                        status_str=f"[dim]{status}[/dim]",
                         width=width,
                         height=height,
                     )

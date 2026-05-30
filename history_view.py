@@ -7,7 +7,7 @@ Shows past search queries and lets users replay them or review results.
 import shutil
 from typing import Dict, Any, List
 
-from ui import BreadcrumbPath, clear_screen, getch, SessionState, restore_terminal
+from ui import BreadcrumbPath, clear_screen, getch, SessionState, restore_terminal, render_view_header, render_status_line
 from renderers import render_dual_panel, render_single_panel
 from search_view import run_card_search_view
 
@@ -33,10 +33,7 @@ def run_history_view(scryfall_db: Dict[str, Any], session_state: SessionState) -
 
         while True:
             clear_screen()
-
-            # Breadcrumb
-            breadcrumb_str = f"[dim cyan]{breadcrumb.render()}[/dim cyan]"
-            print(breadcrumb_str)
+            print(render_view_header(breadcrumb))
             print()
 
             # Get history (newest first)
@@ -73,7 +70,7 @@ def run_history_view(scryfall_db: Dict[str, Any], session_state: SessionState) -
                 else:
                     result_lines = ["(No entry selected)"]
 
-                status_line = "↑↓ navigate · Enter replay · q quit"
+                status = render_status_line("↑↓ navigate", "Enter replay", "ESC back")
 
                 if use_dual_panel:
                     output = render_dual_panel(
@@ -83,7 +80,7 @@ def run_history_view(scryfall_db: Dict[str, Any], session_state: SessionState) -
                         right_title="Top Results",
                         right_lines=result_lines,
                         breadcrumb_str="",
-                        status_str=f"[dim]{status_line}[/dim]",
+                        status_str=f"[dim]{status}[/dim]",
                         width=width,
                         height=height,
                     )
@@ -93,7 +90,7 @@ def run_history_view(scryfall_db: Dict[str, Any], session_state: SessionState) -
                         items=history_items,
                         selected=selected_index,
                         breadcrumb_str="",
-                        status_str=f"[dim]{status_line}[/dim]",
+                        status_str=f"[dim]{status}[/dim]",
                         width=width,
                         height=height,
                     )

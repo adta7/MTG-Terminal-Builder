@@ -8,7 +8,7 @@ import sys
 import shutil
 from typing import Optional, List, Dict, Any
 
-from ui import BreadcrumbPath, clear_screen, getch, SessionState, restore_terminal
+from ui import BreadcrumbPath, clear_screen, getch, SessionState, restore_terminal, render_view_header, render_status_line
 from search import search_cards
 from renderers import render_card_preview, render_dual_panel, render_single_panel
 
@@ -42,7 +42,7 @@ def run_card_search_view(
 
         # Step 1: Get initial search query
         clear_screen()
-        print(f"[dim cyan]{breadcrumb.render()}[/dim cyan]")
+        print(render_view_header(breadcrumb))
         print()
         prompt = f"Search for card [{prefill_query}]: " if prefill_query else "Search for card: "
         search_query = input(prompt).strip() or prefill_query
@@ -60,10 +60,7 @@ def run_card_search_view(
         while True:
             # Render current state
             clear_screen()
-
-            # Breadcrumb
-            breadcrumb_str = f"[dim cyan]{breadcrumb.render()}[/dim cyan]"
-            print(breadcrumb_str)
+            print(render_view_header(breadcrumb))
             print()
 
             # Determine layout based on terminal width
@@ -99,7 +96,7 @@ def run_card_search_view(
                 else:
                     preview_lines = ["(No card selected)"]
 
-                status_line = "↑↓ navigate · p pin · / search · q quit"
+                status = render_status_line("↑↓ navigate", "p pin", "/ search", "ESC back")
 
                 output = render_dual_panel(
                     left_title=f"Search Results ({len(search_results)})",
@@ -108,7 +105,7 @@ def run_card_search_view(
                     right_title="Preview",
                     right_lines=preview_lines,
                     breadcrumb_str="",
-                    status_str=f"[dim]{status_line}[/dim]",
+                    status_str=f"[dim]{status}[/dim]",
                     width=width,
                     height=height,
                 )
@@ -121,14 +118,14 @@ def run_card_search_view(
                     f"★ {c.get('name', 'Unknown')}" if session_state.is_pinned(c) else c.get("name", "Unknown")
                     for c in search_results
                 ]
-                status_line = "↑↓ navigate · p pin · / search · q quit"
+                status = render_status_line("↑↓ navigate", "p pin", "/ search", "ESC back")
 
                 output = render_single_panel(
                     title=f"Search Results ({len(search_results)})",
                     items=card_names,
                     selected=selected_index if search_results else -1,
                     breadcrumb_str="",
-                    status_str=f"[dim]{status_line}[/dim]",
+                    status_str=f"[dim]{status}[/dim]",
                     width=width,
                     height=height,
                 )

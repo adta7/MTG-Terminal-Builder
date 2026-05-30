@@ -855,6 +855,11 @@ def pick_deck(decks):
         print(f"  Please enter a number between 1 and {new_idx}.")
 
 def run_deck_manager():
+    from ui import BreadcrumbPath, render_view_header
+    breadcrumb = BreadcrumbPath("MTG Pipeline", "Deck Manager")
+    clear_screen()
+    print(render_view_header(breadcrumb))
+    print()
     header("Deck Manager")
     decks = list_decks()
 
@@ -1202,6 +1207,11 @@ def print_card(card):
     print()
 
 def run_card_lookup():
+    from ui import BreadcrumbPath, render_view_header
+    breadcrumb = BreadcrumbPath("MTG Pipeline", "Card Lookup")
+    clear_screen()
+    print(render_view_header(breadcrumb))
+    print()
     header("Card Lookup")
     db = get_scryfall_db()
 
@@ -1603,6 +1613,11 @@ def apply_pipeline_corrections(df, name_col, results, corrections):
 
 
 def run_collection_pipeline():
+    from ui import BreadcrumbPath, render_view_header
+    breadcrumb = BreadcrumbPath("MTG Pipeline", "Collection Pipeline")
+    clear_screen()
+    print(render_view_header(breadcrumb))
+    print()
     card_list_path = pick_card_list()
     if not card_list_path:
         console.print("  [dim]Pipeline cancelled.[/dim]")
