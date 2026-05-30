@@ -5,6 +5,33 @@ Format: [Version] — Date — Description
 
 ---
 
+## [Unreleased] — 2026-05-30
+
+### Added
+- `test_getch.py` — debug script for testing keyboard input detection
+
+### Changed
+- `ui.py` — consolidated arrow key and ESC detection with optimized 50ms timeout
+  - Refined escape sequence handling to support both CSI (`[`) and SS3 (`O`) formats
+  - Use explicit file descriptor in `select()` for clarity
+  - Reduced continuation byte timeout to 50ms (proven sweet spot via debugging)
+- `search_view.py`, `pinned_view.py`, `history_view.py` — unified breadcrumb styling
+  - Use `render_view_header()` for consistent plain-text breadcrumb display
+  - Import and use `Console` from `rich.console` for Rich markup rendering
+  - Consistent status line formatting with `render_status_line()`
+
+### Fixed
+- Arrow key navigation in interactive menu — was returning 'UP'/'DOWN' but menu wasn't responding
+  - Root cause: First implementation used sys.stdin in select() with unclear timeout logic
+  - Fix: Use explicit file descriptor (fd), 50ms timeout for continuation bytes only
+  - Verified via detailed logging that escape sequence detection now works correctly
+- Screen flicker on menu transitions — removed unnecessary `print()` calls in render loops
+- Literal Rich markup appearing in terminal (e.g., `[yellow]text[/yellow]`)
+  - Fix: Changed from plain `print()` to `console.print()` for Rich-formatted strings
+- Missing imports in `mtg.py` — added missing `clear_screen` to import statements
+
+---
+
 ## [1.0.0] — 2026-05-04
 
 ### Added

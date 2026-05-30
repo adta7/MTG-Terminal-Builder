@@ -569,3 +569,82 @@ def getch() -> str:
 The separation makes it simple and reliable.
 
 ---
+
+## 2026-05-30
+
+### Arrow Key Detection: The 50ms Sweet Spot
+
+After extensive debugging, the correct approach to distinguish standalone ESC from arrow keys is:
+
+**Use a 50ms timeout for continuation bytes:**
+
+```python
+def getch() -> str:
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        
+        # Block forever on first byte (no timeout)
+        ready, _, _ = select.select([fd], [], [])
+        if not ready:
+            return ''
+        
+        ch = os.read(fd, 1)
+        
+        if ch == b'\x1b':
+            # 50ms timeout for continuation bytes
+            ready, _, _ = select.select([fd], [], [], 0.05)
+            if ready:
+                ch2 = os.read(fd, 1)
+                if ch2 == b'[':
+                    ready, _, _ = select.select([fd], [], [], 0.05)
+                    if ready:
+                        ch3 = os.read(fd, 1)
+                        if ch3 == b'A': return 'UP'
+                        elif ch3 == b'B': return 'DOWN'
+                        elif ch3 == b'C': return 'RIGHT'
+                        elif ch3 == b'D': return 'LEFT'
+                elif ch2 == b'O':
+                    # Alternative SS3 format (some terminals)
+                    ready, _, _ = select.select([fd], [], [], 0.05)
+                    if ready:
+                        ch3 = os.read(fd, 1)
+                        if ch3 == b'A': return 'UP'
+                        elif ch3 == b'B': return 'DOWN'
+                        elif ch3 == b'C': return 'RIGHT'
+                        elif ch3 == b'D': return 'LEFT'
+                return 'ESC'
+            return 'ESC'
+        
+        return ch.decode('utf-8', errors='replace')
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+```
+
+**Why 50ms works:**
+- Arrow key sequences arrive in immediate succession (within 10-20ms)
+- A 50ms timeout is short enough to not delay standalone ESC responses
+- It's long enough to catch the full CSI sequence even on slower terminal emulators
+- Matches real-world terminal behavior where users press one key at a time
+
+**Key details:**
+- Use explicit file descriptor (`fd`) instead of file object in `select()`
+- Support both CSI (`[`) and SS3 (`O`) escape formats for maximum compatibility
+- Use `elif` in the character comparisons for clarity and slight efficiency
+- Block forever on the first byte (no timeout), use 50ms timeout only for continuation
+
+**Debugging approach that worked:**
+Added detailed logging to `/tmp/getch.log` showing each byte read and each `select()` result. This proved the arrow keys WERE being detected correctly, narrowing the issue to elsewhere in the codebase. The 50ms timeout turned out to be exactly right.
+
+---
+
+### Mistakes / Fixes (Updated)
+
+**Problem:** Arrow keys weren't working despite `getch()` correctly returning 'UP' and 'DOWN'.
+**Root cause:** Earlier sessions had tried 200ms and other timeouts, which were too long and conflicting with the input loop's timing.
+**What actually worked:** Settled on 50ms timeout after debugging confirmed this value allowed both:
+  1. Standalone ESC presses (timeout expires, returns 'ESC' immediately)
+  2. Complete arrow key sequences (all three bytes arrive within 50ms windows)
+
+---

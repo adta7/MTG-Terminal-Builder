@@ -1,10 +1,16 @@
 # MTG Pipeline Terminal
 
-A personal command-line toolkit for enriching and organizing a Magic: The Gathering card collection using Scryfall data.
+An interactive terminal application for browsing Magic: The Gathering cards, building decks, and enriching card collections with Scryfall data.
 
 ## Overview
 
-This project takes a raw card list (exported from a collection tracker) and enriches it with full Scryfall card data — oracle text, mana cost, type, legalities, and more. The output is a clean, deckbuilding-ready spreadsheet.
+This project is a comprehensive MTG toolkit with:
+- **Card Search** — quickly look up any card with interactive navigation
+- **Pinned Cards** — save cards to your pinned list for quick reference
+- **Search History** — revisit past searches with one keystroke
+- **Deck Manager** — create, edit, and organize deck lists
+- **Card Lookup** — full card rendering with oracle text and mana costs
+- **Collection Enricher** — enrich raw card lists with complete Scryfall data
 
 Everything runs from a single interactive command: `python3 mtg.py`
 
@@ -55,12 +61,42 @@ mtg-pipeline-terminal/
 
 ## What It Does
 
-When you run mtg.py, it will:
-1. Auto-detect your card list from ~/Downloads
-2. Auto-detect the Scryfall JSON from the current folder
-3. Show a preview and confirm the name column
-4. Ask which export mode you want
-5. Ask for an output filename (date added automatically)
-6. Run the pipeline with live output
-7. Show a summary with type/color breakdown
-8. Save the result to ~/Downloads
+When you run mtg.py, you get an interactive main menu:
+
+```
+What would you like to do?
+──────────────────────────
+
+> 1  Search Cards
+  2  Pinned Cards
+  3  Search History
+  4  Deck Manager
+  5  Card Lookup
+  6  Collection Enhancer
+  7  Quit
+```
+
+### Menu Options
+
+**Search Cards** — Interactive card search with arrow key navigation, pin to your list, and dual-panel preview
+
+**Pinned Cards** — View and manage saved cards, complete with full card previews
+
+**Search History** — Review past searches and re-run them instantly
+
+**Deck Manager** — Create new decks, edit existing ones, import/export card lists, organize by sets
+
+**Card Lookup** — Traditional card lookup with full rendering (mana cost, oracle text, P/T, legalities)
+
+**Collection Enhancer** — The original enrichment pipeline: upload a spreadsheet and enrich it with Scryfall data
+
+### Keyboard Navigation
+
+All views use consistent keyboard controls:
+- **↑↓** — navigate lists
+- **Enter** — select/confirm
+- **1-9** — quick number select (menus)
+- **p** — pin/unpin cards (search view)
+- **/** — new search (search view)
+- **u** — unpin card (pinned view)
+- **ESC** or **q** — go back one level
