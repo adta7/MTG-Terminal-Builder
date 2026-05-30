@@ -295,6 +295,124 @@ class TestIdempotency:
         db.close()
 
 
+class TestPhase4BPatterns:
+    """Tests for Phase 4B pattern additions: Self_Death_Trigger, Life_Payment, Mana_Multiplier fix."""
+
+    @pytest.fixture
+    def db(self):
+        db = Database(":memory:")
+        db.init_db()
+        tags.seed_tags(db)
+        yield db
+        db.close()
+
+    # ── Self_Death_Trigger ────────────────────────────────────────────────────
+
+    def test_self_death_trigger_fires_on_self_death(self, db):
+        """'When this creature dies' should produce Self_Death_Trigger."""
+        card = Card(
+            name="Festering Newt",
+            mana_cost="{B}", cmc=1, type_line="Creature — Salamander",
+            oracle_text="When this creature dies, target creature an opponent controls gets -1/-1 until end of turn.",
+        )
+        db.insert_card(card)
+        tags.tag_mechanical(card, db)
+        card_tags = {t["name"] for t in db.get_card_tags("Festering Newt")}
+        assert "Self_Death_Trigger" in card_tags
+
+    def test_self_death_trigger_not_on_global_death(self, db):
+        """Blood Artist ('whenever ... creature dies') should NOT get Self_Death_Trigger."""
+        card = Card(
+            name="Blood Artist",
+            mana_cost="{1}{B}", cmc=2, type_line="Creature — Vampire",
+            oracle_text="Whenever Blood Artist or another creature dies, target opponent loses 1 life and you gain 1 life.",
+        )
+        db.insert_card(card)
+        tags.tag_mechanical(card, db)
+        card_tags = {t["name"] for t in db.get_card_tags("Blood Artist")}
+        assert "Self_Death_Trigger" not in card_tags, (
+            "Blood Artist triggers on ANY creature death, not its own — should not have Self_Death_Trigger"
+        )
+
+    def test_self_death_trigger_evidence_populated(self, db):
+        """Self_Death_Trigger evidence row should have populated fields."""
+        card = Card(
+            name="Golgari Thug",
+            mana_cost="{1}{B}", cmc=2, type_line="Creature — Human Warrior",
+            oracle_text="When this creature dies, put target creature card from your graveyard on top of your library.",
+        )
+        db.insert_card(card)
+        tags.tag_mechanical(card, db)
+        evidence = db.get_tag_evidence("Golgari Thug", "Self_Death_Trigger")
+        assert len(evidence) > 0
+        assert evidence[0]["rule_id"] == "mechanical.self_death_trigger.when_this_dies.v1"
+        assert evidence[0]["ability_kind"] == "triggered"
+
+    # ── Life_Payment (activated cost) ─────────────────────────────────────────
+
+    def test_life_payment_fires_on_activated_cost(self, db):
+        """'Pay N life:' as an activated ability cost should produce Life_Payment."""
+        card = Card(
+            name="Chainer, Dementia Master",
+            mana_cost="{3}{B}{B}", cmc=5, type_line="Legendary Creature — Human Nightmare",
+            oracle_text="All Nightmares get +1/+1.\n{B}{B}{B}, Pay 3 life: Put target creature card from a graveyard onto the battlefield under your control.",
+        )
+        db.insert_card(card)
+        tags.tag_mechanical(card, db)
+        card_tags = {t["name"] for t in db.get_card_tags("Chainer, Dementia Master")}
+        assert "Life_Payment" in card_tags
+
+    def test_life_payment_fires_on_land_cost(self, db):
+        """'{T}, Pay 1 life: Add {B}.' should produce Life_Payment."""
+        card = Card(
+            name="Ifnir Deadlands",
+            mana_cost=None, cmc=0, type_line="Land — Desert",
+            oracle_text="{T}: Add {C}.\n{T}, Pay 1 life: Add {B}.\n{2}{B}{B}, {T}, Sacrifice a Desert: Put two -1/-1 counters on target creature an opponent controls.",
+        )
+        db.insert_card(card)
+        tags.tag_mechanical(card, db)
+        card_tags = {t["name"] for t in db.get_card_tags("Ifnir Deadlands")}
+        assert "Life_Payment" in card_tags
+
+    def test_life_payment_negative_on_life_loss(self, db):
+        """'Each opponent loses 2 life' should NOT produce Life_Payment."""
+        card = Card(
+            name="Exsanguinate",
+            mana_cost="{X}{B}{B}", cmc=2, type_line="Sorcery",
+            oracle_text="Each opponent loses X life. You gain life equal to the life lost this way.",
+        )
+        db.insert_card(card)
+        tags.tag_mechanical(card, db)
+        card_tags = {t["name"] for t in db.get_card_tags("Exsanguinate")}
+        assert "Life_Payment" not in card_tags
+
+    # ── Mana_Multiplier fix ("adds" → "adds?") ────────────────────────────────
+
+    def test_mana_multiplier_fires_on_adds(self, db):
+        """'adds an additional {B}' (third-person) should produce Mana_Multiplier."""
+        card = Card(
+            name="Bubbling Muck",
+            mana_cost="{B}", cmc=1, type_line="Sorcery",
+            oracle_text="Until end of turn, whenever a player taps a Swamp for mana, that player adds an additional {B}.",
+        )
+        db.insert_card(card)
+        tags.tag_mechanical(card, db)
+        card_tags = {t["name"] for t in db.get_card_tags("Bubbling Muck")}
+        assert "Mana_Multiplier" in card_tags
+
+    def test_mana_multiplier_still_fires_on_add(self, db):
+        """'add an additional {B}' (first-person) should still produce Mana_Multiplier."""
+        card = Card(
+            name="Crypt Ghast",
+            mana_cost="{3}{B}", cmc=4, type_line="Creature — Spirit",
+            oracle_text="Extort (Whenever you cast a spell, you may pay {W/B}. If you do, each opponent loses 1 life and you gain that much life.)\nWhenever you tap a Swamp for mana, add an additional {B}.",
+        )
+        db.insert_card(card)
+        tags.tag_mechanical(card, db)
+        card_tags = {t["name"] for t in db.get_card_tags("Crypt Ghast")}
+        assert "Mana_Multiplier" in card_tags
+
+
 class TestPatternIntegrity:
     """Verify that _MECHANICAL_PATTERNS is structurally sound."""
 

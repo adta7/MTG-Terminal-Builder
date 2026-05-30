@@ -60,7 +60,8 @@ TAGS: list[tuple[str, str, str]] = [
     ("Cost_Reduction",    "mechanical", "Reduces mana costs of spells or abilities."),
     ("Life_Payment",      "mechanical", "Uses life as a cost or substitute resource — converts life into mana, cards, or effects."),
     ("Counter_Spell",     "mechanical", "Counters spells or abilities."),
-    ("Death_Trigger",      "mechanical", "Has an ability that triggers when creatures die."),
+    ("Death_Trigger",      "mechanical", "Has an ability that triggers when ANY creature dies — global death payoff (Blood Artist, Grave Pact)."),
+    ("Self_Death_Trigger", "mechanical", "Triggers when THIS card itself dies — distinct from global death payoffs like Blood Artist."),
     ("Scales_With_Deaths", "mechanical", "Power scales with how many creatures have died — counters, mana, or damage accumulate over the game."),
     ("Permanent_Scaling",  "mechanical", "Power scales with the number of permanents, lands, or symbols on the battlefield — grows with board state."),
     ("ETB_Trigger",       "mechanical", "Has an ability that triggers when it or another permanent enters the battlefield."),
@@ -283,7 +284,8 @@ _MECHANICAL_PATTERNS: list[tuple[str, str, float, str]] = [
     ("Mana_Multiplier",   r"add that much mana of any (?:one )?(?:type|color)", 0.85,
         "mechanical.mana_multiplier.add_that_much.v1"),
     # "Whenever you tap a Swamp for mana, add an additional {B}" — Crypt Ghast, Magus of the Coffers style
-    ("Mana_Multiplier",   r"add an additional \{[wubrgcx]\}", 0.9,
+    # Also catches "adds an additional {B}" (Bubbling Muck uses third-person "adds")
+    ("Mana_Multiplier",   r"adds? an additional \{[wubrgcx]\}", 0.9,
         "mechanical.mana_multiplier.add_additional_symbol.v1"),
     # "Whenever you tap a land for mana, add one mana of any type" — general tap doublers
     ("Mana_Multiplier",   r"whenever you tap .{1,30}for mana, add", 0.9,
@@ -345,6 +347,12 @@ _MECHANICAL_PATTERNS: list[tuple[str, str, float, str]] = [
     # "pay 2 life rather than pay that mana" — K'rrik, Phyrexian mana cards
     ("Life_Payment",      r"pay \d+ life rather than", 0.95,
         "mechanical.life_payment.pay_life_rather_than.v1"),
+    # "Pay 3 life:" or "{T}, Pay 1 life:" — life as activated ability cost.
+    # Covers Chainer, Dementia Master; Ifnir Deadlands; and similar.
+    # Placed AFTER pay_life_rather_than to avoid double-triggering on those cards,
+    # though evidence idempotency handles duplicates safely.
+    ("Life_Payment",      r"pay \d+ life", 0.9,
+        "mechanical.life_payment.pay_n_life_cost.v1"),
     # "you draw a card and you lose 1 life" — Phyrexian Arena style (life drain as card cost)
     ("Life_Payment",      r"draw a card and (?:you )?(?:lose|pay) \d+ life", 0.85,
         "mechanical.life_payment.draw_and_lose_life.v1"),
@@ -379,6 +387,14 @@ _MECHANICAL_PATTERNS: list[tuple[str, str, float, str]] = [
     #         "whenever Blood Artist or another creature dies", etc.
     ("Death_Trigger",     r"whenever .{1,40}creature(?:s)? (?:you control )?(?:dies|die)", 0.9,
         "mechanical.death_trigger.whenever_creature_dies.v1"),
+
+    # Self-death trigger — this card itself has a trigger when IT dies.
+    # Distinct from Death_Trigger (which fires when ANY creature dies).
+    # Covers: Bile-Vial Boggart, Festering Newt, Golgari Thug, Tattered Mummy, etc.
+    # Note: confidence 0.85 because granted abilities ("gains 'when this creature dies'")
+    # can also match; they are less common but not excluded by stripping.
+    ("Self_Death_Trigger", r"when this (?:creature|permanent) dies", 0.85,
+        "mechanical.self_death_trigger.when_this_dies.v1"),
 
     # Trigger doublers — makes other triggered abilities fire again. Major engine amplifier.
     ("Trigger_Doubler",   r"triggers? an additional time", 0.95,

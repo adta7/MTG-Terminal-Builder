@@ -117,14 +117,16 @@ class Database:
             )
         """)
 
-        # Migrate card_tags from old flat schema if it exists
+        # Safe column rename: card_id → card_name if the old name is present.
+        # This is safe because it is additive — it changes a column name but
+        # preserves all rows. It runs once and is a no-op on current-schema DBs.
         cur.execute("PRAGMA table_info(card_tags)")
         old_columns = {row[1] for row in cur.fetchall()}
-        if "role" in old_columns or "strength" in old_columns:
-            cur.execute("DROP TABLE card_tags")
-        elif "card_id" in old_columns and "card_name" not in old_columns:
-            # Rename card_id → card_name (schema alignment with tag_evidence)
+        if "card_id" in old_columns and "card_name" not in old_columns:
             cur.execute("ALTER TABLE card_tags RENAME COLUMN card_id TO card_name")
+        # NOTE: The old "role"/"strength" column migration (DROP TABLE card_tags)
+        # was removed from init_db(). Destructive migrations must go through
+        # migrate_legacy_schema() with an explicit backup. See that function below.
 
         # Card tags: card-to-tag relationships with confidence (phase 2)
         # confidence: 0.0-1.0 scale
@@ -301,6 +303,39 @@ class Database:
         cur = self.conn.cursor()
         cur.execute("SELECT COUNT(DISTINCT card_name) FROM collection")
         return cur.fetchone()[0]
+
+    def migrate_legacy_schema(self, backup_path: Optional[str] = None) -> list[str]:
+        """Apply destructive schema migrations to an existing database.
+
+        This is intentionally SEPARATE from init_db(). Normal startup never
+        drops tables or destroys data. This function must be called explicitly.
+
+        Creates a backup before any destructive change when backup_path is given.
+
+        Returns a list of migration steps that were applied.
+        """
+        import shutil
+        applied = []
+
+        if backup_path:
+            shutil.copy2(self.db_path, backup_path)
+            applied.append(f"backup created: {backup_path}")
+
+        cur = self.conn.cursor()
+
+        # Migration: drop the old role/strength card_tags schema (pre-Phase 2).
+        # This schema stored tags as role+strength columns and is incompatible
+        # with the current tag_id + confidence schema.
+        cur.execute("PRAGMA table_info(card_tags)")
+        old_cols = {row[1] for row in cur.fetchall()}
+        if "role" in old_cols or "strength" in old_cols:
+            cur.execute("DROP TABLE card_tags")
+            self.conn.commit()
+            # Recreate with current schema
+            self.init_db()
+            applied.append("card_tags: dropped old role/strength schema and recreated")
+
+        return applied
 
     def insert_card(self, card: Card) -> int:
         """Insert or replace a card. Returns card id."""
