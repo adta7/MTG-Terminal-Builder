@@ -212,6 +212,10 @@ _MECHANICAL_PATTERNS: list[tuple[str, str, float, str]] = [
         "mechanical.sacrifice_outlet.sacrifice_cost.v1"),
     ("Sacrifice_Outlet",  r"sacrifice .{1,20}: add", 1.0,
         "mechanical.sacrifice_outlet.sacrifice_for_mana.v1"),
+    # "Sacrifice ten nonland permanents:" — Bolas's Citadel and similar mass-sacrifice outlets.
+    # Covers word-numbers (one through ten) and digit quantities that slip past the patterns above.
+    ("Sacrifice_Outlet",  r"sacrifice (?:one|two|three|four|five|six|seven|eight|nine|ten|\d+) (?:\w+ )*(?:creature|permanent)s?\s*:", 0.95,
+        "mechanical.sacrifice_outlet.numbered_permanents.v1"),
 
     # Forced sacrifice (OPPONENTS are forced to sacrifice)
     # Covers: Sheoldred, Grave Pact, Plaguecrafter, Braids, Butcher of Malakir
@@ -348,6 +352,10 @@ _MECHANICAL_PATTERNS: list[tuple[str, str, float, str]] = [
     # "pay 2 life rather than pay that mana" — K'rrik, Phyrexian mana cards
     ("Life_Payment",      r"pay \d+ life rather than", 0.95,
         "mechanical.life_payment.pay_life_rather_than.v1"),
+    # "pay life equal to its mana value" — Bolas's Citadel, Yawgmoth's Bargain style
+    # No digit in the oracle text — separate pattern needed.
+    ("Life_Payment",      r"pay life equal to", 0.9,
+        "mechanical.life_payment.pay_life_equal_to.v1"),
     # "Pay 3 life:" or "{T}, Pay 1 life:" — life as activated ability cost.
     # Covers Chainer, Dementia Master; Ifnir Deadlands; and similar.
     # Placed AFTER pay_life_rather_than to avoid double-triggering on those cards,
@@ -629,7 +637,10 @@ FUNCTIONAL_RULES: list[tuple[frozenset, str, float]] = [
     (frozenset({"Sacrifice_Outlet", "Token_Generation"}),           "Threat",            0.70),
     (frozenset({"Evasion", "Lifelink"}),                            "Threat",            0.70),
     (frozenset({"Forced_Sacrifice"}),                               "Threat",            0.60),
-    (frozenset({"Evasion"}),                                        "Threat",            0.50),
+    # NOTE: Evasion alone (0.50) was removed — too broad.
+    # A 1/1 flyer is not the same threat class as Archon of Cruelty.
+    # Evasion should eventually derive "Combat_Relevance" (not yet a tag),
+    # while Threat requires a meaningful second signal (drain, trigger, forced sac, etc.).
 
     # ── Finisher ─────────────────────────────────────────────────────────────
     # Can directly close out the game when conditions are met

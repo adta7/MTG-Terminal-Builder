@@ -400,6 +400,61 @@ class TestPhase4BPatterns:
         card_tags = {t["name"] for t in db.get_card_tags("Bubbling Muck")}
         assert "Mana_Multiplier" in card_tags
 
+    # ── Bolas's Citadel Layer 2 fixes ────────────────────────────────────────
+
+    def test_life_payment_fires_on_pay_life_equal_to(self, db):
+        """'pay life equal to its mana value' should produce Life_Payment."""
+        card = Card(
+            name="Bolas's Citadel",
+            mana_cost="{3}{B}{B}{B}", cmc=6, type_line="Legendary Artifact",
+            oracle_text=(
+                "You may look at the top card of your library at any time.\n"
+                "You may play lands and cast spells from the top of your library. "
+                "If you cast a spell this way, pay life equal to its mana value rather than pay its mana cost.\n"
+                "{T}, Sacrifice ten nonland permanents: Each opponent loses 10 life."
+            ),
+        )
+        db.insert_card(card)
+        tags.tag_mechanical(card, db)
+        card_tags = {t["name"] for t in db.get_card_tags("Bolas's Citadel")}
+        assert "Life_Payment" in card_tags, f"Expected Life_Payment, got {card_tags}"
+
+    def test_sacrifice_outlet_fires_on_numbered_permanents(self, db):
+        """'Sacrifice ten nonland permanents:' should produce Sacrifice_Outlet."""
+        card = Card(
+            name="Bolas's Citadel",
+            mana_cost="{3}{B}{B}{B}", cmc=6, type_line="Legendary Artifact",
+            oracle_text=(
+                "You may look at the top card of your library at any time.\n"
+                "You may play lands and cast spells from the top of your library. "
+                "If you cast a spell this way, pay life equal to its mana value rather than pay its mana cost.\n"
+                "{T}, Sacrifice ten nonland permanents: Each opponent loses 10 life."
+            ),
+        )
+        db.insert_card(card)
+        tags.tag_mechanical(card, db)
+        card_tags = {t["name"] for t in db.get_card_tags("Bolas's Citadel")}
+        assert "Sacrifice_Outlet" in card_tags, f"Expected Sacrifice_Outlet, got {card_tags}"
+
+    def test_bolas_citadel_full_tag_set(self, db):
+        """Bolas's Citadel should get Life_Drain, Life_Payment, and Sacrifice_Outlet."""
+        card = Card(
+            name="Bolas's Citadel",
+            mana_cost="{3}{B}{B}{B}", cmc=6, type_line="Legendary Artifact",
+            oracle_text=(
+                "You may look at the top card of your library at any time.\n"
+                "You may play lands and cast spells from the top of your library. "
+                "If you cast a spell this way, pay life equal to its mana value rather than pay its mana cost.\n"
+                "{T}, Sacrifice ten nonland permanents: Each opponent loses 10 life."
+            ),
+        )
+        db.insert_card(card)
+        tags.tag_mechanical(card, db)
+        card_tags = {t["name"] for t in db.get_card_tags("Bolas's Citadel")}
+        expected = {"Life_Drain", "Life_Payment", "Sacrifice_Outlet"}
+        missing = expected - card_tags
+        assert not missing, f"Bolas's Citadel missing tags: {missing}. Got: {card_tags}"
+
     def test_mana_multiplier_still_fires_on_add(self, db):
         """'add an additional {B}' (first-person) should still produce Mana_Multiplier."""
         card = Card(
