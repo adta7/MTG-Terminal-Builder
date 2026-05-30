@@ -1701,8 +1701,6 @@ def main():
             main_menu_items,
         )
 
-        print()
-
         if choice is None:
             # User cancelled
             continue
@@ -1713,16 +1711,11 @@ def main():
                 db = get_scryfall_db()
                 run_card_search_view(db, session_state)
             except Exception as e:
-                print(f"  ✗ Error in search view: {e}")
-                import traceback
-                traceback.print_exc()
-            # Always clear and return to menu
-            print("\n  Returning to menu...\n")
+                pass
 
         elif choice.key == "pinned":
             # Pinned Cards
             run_pinned_cards_view(session_state)
-            print()
 
         elif choice.key == "history":
             # Search History
@@ -1730,10 +1723,9 @@ def main():
                 db = get_scryfall_db()
                 run_history_view(db, session_state)
             except KeyboardInterrupt:
-                print("\n\nAborted.")
+                pass
             except Exception as e:
                 console.print(f"[red]Error: {e}[/red]")
-            print()
 
         elif choice.key == "deck":
             run_deck_manager()
