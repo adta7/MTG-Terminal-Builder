@@ -7,24 +7,24 @@ Rules fire when a card's mechanical tags satisfy the required set.
 
 | Role | Cards |
 |------|-------|
-| Engine | 47 |
-| Conversion | 32 |
+| Engine | 50 |
+| Conversion | 34 |
 | Payoff | 46 |
 | Fuel | 36 |
 | Recursion | 36 |
-| Finisher | 13 |
+| Finisher | 14 |
 | Finisher_Support | 26 |
-| Mana_Engine | 12 |
+| Mana_Engine | 13 |
 | Mana_Acceleration | 41 |
 | Card_Draw | 47 |
 | Card_Advantage | 64 |
-| Enabler | 67 |
+| Enabler | 69 |
 | Setup | 22 |
 | Removal | 49 |
 | Interaction | 44 |
-| Threat | 74 |
+| Threat | 41 |
 | Protection | 5 |
-| *(no functional role)* | 107 |
+| *(no functional role)* | 122 |
 
 ## Watchlist: Deck Identity Cards
 
@@ -73,8 +73,13 @@ Rules fire when a card's mechanical tags satisfy the required set.
   - `Token_Generation` → **Fuel** (65%)
 
 ### Bolas's Citadel
-- **Mechanical:** Life_Drain
-- **Functional:** *(none)*
+- **Mechanical:** Life_Drain, Life_Payment, Sacrifice_Outlet
+- **Functional:** Conversion, Enabler, Engine, Finisher
+- **Rules that fired:**
+  - `Sacrifice_Outlet` → **Enabler** (80%)
+  - `Life_Drain + Sacrifice_Outlet` → **Finisher** (75%)
+  - `Life_Payment` → **Engine** (65%)
+  - `Life_Payment` → **Conversion** (65%)
 
 ### Black Market
 - **Mechanical:** Death_Trigger, Mana_Production, Scales_With_Deaths, Upkeep_Trigger
@@ -150,12 +155,13 @@ Rules fire when a card's mechanical tags satisfy the required set.
 
 ## Functional Roles Detail
 
-### Engine (47 cards)
+### Engine (50 cards)
 
 - **Archon of Cruelty** via `Draw_Effect + Forced_Sacrifice` | also: Card_Advantage, Card_Draw, Interaction, Payoff, Removal, Threat
 - **Ashnod's Altar** via `Mana_Production + Sacrifice_Outlet` | also: Conversion, Enabler, Mana_Acceleration, Mana_Engine
 - **Black Market** via `Death_Trigger + Mana_Production` | also: Conversion, Mana_Acceleration, Mana_Engine, Payoff
 - **Blighted Blackthorn** via `Life_Payment` | also: Card_Advantage, Card_Draw, Conversion, Payoff, Threat
+- **Bolas's Citadel** via `Life_Payment` | also: Conversion, Enabler, Finisher
 - **Braids, Arisen Nightmare** via `Draw_Effect + Upkeep_Trigger` | also: Card_Advantage, Card_Draw, Interaction, Payoff, Removal, Threat
 - **Butcher of Malakir** via `Death_Trigger + Forced_Sacrifice` | also: Interaction, Removal, Threat
 - **Ceremonial Knife** via `Repeatable_Token_Generation` | also: Fuel
@@ -185,27 +191,30 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Phyrexian Reclamation** via `Life_Payment` | also: Conversion, Recursion
 - **Pitiless Plunderer** via `Repeatable_Token_Generation` | also: Conversion, Fuel, Payoff
 - **Plumb the Forbidden** via `Life_Payment` | also: Card_Advantage, Card_Draw, Conversion
+- **Priest of Forgotten Gods** via `Mana_Production + Sacrifice_Outlet` | also: Card_Advantage, Card_Draw, Conversion, Enabler, Mana_Acceleration, Mana_Engine
 - **Sheoldred, Whispering One** via `Reanimation + Upkeep_Trigger` | also: Enabler, Interaction, Recursion, Removal, Threat
 - **Sinister Gnarlbark** via `Draw_Effect + Upkeep_Trigger` | also: Card_Advantage, Card_Draw, Payoff
 - **Skullclamp** via `Death_Trigger + Draw_Effect` | also: Card_Advantage, Card_Draw, Conversion, Payoff
-- **Smothering Abomination** via `Draw_Effect + Upkeep_Trigger` | also: Card_Advantage, Card_Draw, Payoff, Threat
+- **Smothering Abomination** via `Draw_Effect + Upkeep_Trigger` | also: Card_Advantage, Card_Draw, Payoff
 - **Songs of the Damned** via `Mana_Production + Scales_With_Deaths` | also: Conversion, Mana_Acceleration, Mana_Engine, Payoff
 - **Staff of Compleation** via `Life_Payment` | also: Card_Advantage, Card_Draw, Conversion, Interaction, Mana_Acceleration, Removal
 - **Taborax, Hope's Demise** via `Death_Trigger + Draw_Effect` | also: Card_Advantage, Card_Draw, Conversion, Payoff, Threat
-- **The Black Gate** via `Life_Payment` | also: Conversion, Threat
+- **The Black Gate** via `Life_Payment` | also: Conversion
 - **Toxic Deluge** via `Life_Payment` | also: Conversion, Interaction, Removal
 - **Treasure** via `Mana_Production + Sacrifice_Outlet` | also: Conversion, Enabler, Mana_Acceleration, Mana_Engine
 - **Vampiric Rites** via `Draw_Effect + Sacrifice_Outlet` | also: Card_Advantage, Card_Draw, Conversion, Enabler
 - **Vraska, Betrayal's Sting** via `Mana_Production + Sacrifice_Outlet` | also: Card_Advantage, Card_Draw, Conversion, Enabler, Finisher, Mana_Acceleration, Mana_Engine
+- **Whisper, Blood Liturgist** via `Reanimation + Sacrifice_Outlet` | also: Enabler, Recursion
 - **Woe Strider** via `Sacrifice_Outlet + Token_Generation` | also: Conversion, Enabler, Fuel, Threat
 - **Yawgmoth, Thran Physician** via `Draw_Effect + Sacrifice_Outlet` | also: Card_Advantage, Card_Draw, Conversion, Enabler
 
-### Conversion (32 cards)
+### Conversion (34 cards)
 
 - **Ashnod's Altar** via `Mana_Production + Sacrifice_Outlet` | also: Enabler, Engine, Mana_Acceleration, Mana_Engine
 - **Black Market** via `Mana_Production + Scales_With_Deaths` | also: Engine, Mana_Acceleration, Mana_Engine, Payoff
-- **Blight Mound** via `Death_Trigger + Token_Generation` | also: Fuel, Payoff, Threat
+- **Blight Mound** via `Death_Trigger + Token_Generation` | also: Fuel, Payoff
 - **Blighted Blackthorn** via `Draw_Effect + Life_Payment` | also: Card_Advantage, Card_Draw, Engine, Payoff, Threat
+- **Bolas's Citadel** via `Life_Payment` | also: Enabler, Engine, Finisher
 - **Chainer, Dementia Master** via `Life_Payment` | also: Engine
 - **Crypt of Agadeem** via `Mana_Production + Scales_With_Deaths` | also: Engine, Mana_Acceleration, Mana_Engine, Payoff
 - **Erebos, Bleak-Hearted** via `Draw_Effect + Sacrifice_Outlet` | also: Card_Advantage, Card_Draw, Enabler, Engine, Payoff
@@ -223,11 +232,12 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Phyrexian Reclamation** via `Life_Payment + Recursion_To_Hand` | also: Engine, Recursion
 - **Pitiless Plunderer** via `Death_Trigger + Token_Generation` | also: Engine, Fuel, Payoff
 - **Plumb the Forbidden** via `Draw_Effect + Life_Payment` | also: Card_Advantage, Card_Draw, Engine
+- **Priest of Forgotten Gods** via `Mana_Production + Sacrifice_Outlet` | also: Card_Advantage, Card_Draw, Enabler, Engine, Mana_Acceleration, Mana_Engine
 - **Skullclamp** via `Death_Trigger + Draw_Effect` | also: Card_Advantage, Card_Draw, Engine, Payoff
 - **Songs of the Damned** via `Mana_Production + Scales_With_Deaths` | also: Engine, Mana_Acceleration, Mana_Engine, Payoff
 - **Staff of Compleation** via `Life_Payment + Mana_Production` | also: Card_Advantage, Card_Draw, Engine, Interaction, Mana_Acceleration, Removal
 - **Taborax, Hope's Demise** via `Death_Trigger + Draw_Effect` | also: Card_Advantage, Card_Draw, Engine, Payoff, Threat
-- **The Black Gate** via `Life_Payment` | also: Engine, Threat
+- **The Black Gate** via `Life_Payment` | also: Engine
 - **Toxic Deluge** via `Life_Payment` | also: Engine, Interaction, Removal
 - **Treasure** via `Mana_Production + Sacrifice_Outlet` | also: Enabler, Engine, Mana_Acceleration, Mana_Engine
 - **Vampiric Rites** via `Draw_Effect + Sacrifice_Outlet` | also: Card_Advantage, Card_Draw, Enabler, Engine
@@ -240,7 +250,7 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Accursed Marauder** via `ETB_Trigger + Forced_Sacrifice` | also: Interaction, Removal, Threat
 - **Archon of Cruelty** via `ETB_Trigger + Life_Drain` | also: Card_Advantage, Card_Draw, Engine, Interaction, Removal, Threat
 - **Black Market** via `Scales_With_Deaths` | also: Conversion, Engine, Mana_Acceleration, Mana_Engine
-- **Blight Mound** via `Death_Trigger + Life_Gain` | also: Conversion, Fuel, Threat
+- **Blight Mound** via `Death_Trigger + Life_Gain` | also: Conversion, Fuel
 - **Blighted Blackthorn** via `ETB_Trigger + Life_Drain` | also: Card_Advantage, Card_Draw, Conversion, Engine, Threat
 - **Blood Artist** via `Death_Trigger + Life_Drain` | also: Threat
 - **Bloodgift Demon** via `Life_Drain + Upkeep_Trigger` | also: Threat
@@ -274,7 +284,7 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Sinister Gnarlbark** via `Draw_Effect + Upkeep_Trigger` | also: Card_Advantage, Card_Draw, Engine
 - **Skullclamp** via `Death_Trigger + Draw_Effect` | also: Card_Advantage, Card_Draw, Conversion, Engine
 - **Skymarch Bloodletter** via `ETB_Trigger + Life_Drain` | also: Threat
-- **Smothering Abomination** via `Draw_Effect + Upkeep_Trigger` | also: Card_Advantage, Card_Draw, Engine, Threat
+- **Smothering Abomination** via `Draw_Effect + Upkeep_Trigger` | also: Card_Advantage, Card_Draw, Engine
 - **Sneering Shadewriter** via `ETB_Trigger + Life_Drain` | also: Threat
 - **Songs of the Damned** via `Scales_With_Deaths` | also: Conversion, Engine, Mana_Acceleration, Mana_Engine
 - **Stensian Sanguinist // Exsanguinate** via `Combat_Trigger + Life_Drain` | also: Finisher, Threat
@@ -287,7 +297,7 @@ Rules fire when a card's mechanical tags satisfy the required set.
 ### Fuel (36 cards)
 
 - **Abnormal Endurance** via `Return_Self_From_Graveyard` | also: Recursion
-- **Blight Mound** via `Token_Generation` | also: Conversion, Payoff, Threat
+- **Blight Mound** via `Token_Generation` | also: Conversion, Payoff
 - **Blood Servitor** via `Token_Generation`
 - **Blood Speaker** via `Return_Self_From_Graveyard` | also: Card_Advantage, Enabler, Finisher_Support, Recursion, Setup
 - **Bloodghast** via `Return_Self_From_Graveyard` | also: Enabler, Recursion
@@ -305,21 +315,21 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Liliana, the Last Hope** via `Repeatable_Token_Generation` | also: Enabler, Engine, Finisher_Support, Recursion, Setup
 - **Malakir Rebirth // Malakir Mire** via `Return_Self_From_Graveyard` | also: Recursion
 - **Moseo, Vein's New Dean** via `Token_Generation` | also: Enabler, Engine, Payoff, Recursion, Threat
-- **Nether Traitor** via `Return_Self_From_Graveyard` | also: Enabler, Recursion, Threat
+- **Nether Traitor** via `Return_Self_From_Graveyard` | also: Enabler, Recursion
 - **Ob Nixilis of the Black Oath** via `Token_Generation` | also: Card_Advantage, Card_Draw, Conversion, Enabler, Engine, Finisher, Threat
 - **Open the Graves** via `Repeatable_Token_Generation` | also: Conversion, Engine, Payoff
 - **Ophiomancer** via `Repeatable_Token_Generation` | also: Engine
 - **Pawn of Ulamog** via `Token_Generation` | also: Conversion, Enabler, Engine, Mana_Acceleration, Mana_Engine, Payoff, Threat
 - **Pitiless Plunderer** via `Repeatable_Token_Generation` | also: Conversion, Engine, Payoff
-- **Puppeteer Clique** via `Undying_Persist` | also: Threat
+- **Puppeteer Clique** via `Undying_Persist`
 - **Reassembling Skeleton** via `Return_Self_From_Graveyard` | also: Enabler, Recursion
 - **Rise of the Dread Marn** via `Token_Generation`
 - **Scarblade Scout** via `Self_Mill` | also: Enabler, Finisher_Support, Setup
-- **Skirsdag High Priest** via `Token_Generation` | also: Threat
+- **Skirsdag High Priest** via `Token_Generation`
 - **Stalactite Dagger** via `Token_Generation`
 - **Stitcher's Supplier** via `Self_Mill` | also: Enabler, Finisher_Support, Setup
 - **Tenacious Dead** via `Return_Self_From_Graveyard` | also: Recursion
-- **The Superlatorium** via `Token_Generation` | also: Threat
+- **The Superlatorium** via `Token_Generation`
 - **Vile Rebirth** via `Token_Generation` | also: Interaction, Removal
 - **Woe Strider** via `Token_Generation` | also: Conversion, Enabler, Engine, Threat
 
@@ -336,7 +346,7 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Gisa, Glorious Resurrector** via `Mass_Reanimate` | also: Enabler, Finisher
 - **Gravedig** via `Recursion_To_Hand`
 - **Gravedigger** via `Recursion_To_Hand`
-- **Gravewaker** via `Reanimation` | also: Enabler, Threat
+- **Gravewaker** via `Reanimation` | also: Enabler
 - **Grim Discovery** via `Recursion_To_Hand`
 - **Hell's Caretaker** via `Reanimation` | also: Enabler, Engine
 - **Incarnation Technique** via `Reanimation` | also: Enabler, Finisher_Support, Fuel, Setup
@@ -347,7 +357,7 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Living Death** via `Mass_Reanimate` | also: Enabler, Finisher
 - **Malakir Rebirth // Malakir Mire** via `Return_Self_From_Graveyard` | also: Fuel
 - **Moseo, Vein's New Dean** via `Reanimation` | also: Enabler, Engine, Fuel, Payoff, Threat
-- **Nether Traitor** via `Reanimation` | also: Enabler, Fuel, Threat
+- **Nether Traitor** via `Reanimation` | also: Enabler, Fuel
 - **Oversold Cemetery** via `Recursion_To_Hand`
 - **Palace Siege** via `Recursion_To_Hand` | also: Payoff
 - **Persist** via `Reanimation` | also: Enabler
@@ -358,12 +368,13 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Sheoldred, Whispering One** via `Reanimation` | also: Enabler, Engine, Interaction, Removal, Threat
 - **Stitch Together** via `Reanimation` | also: Enabler
 - **Tenacious Dead** via `Return_Self_From_Graveyard` | also: Fuel
-- **Veinwitch Coven** via `Recursion_To_Hand` | also: Threat
+- **Veinwitch Coven** via `Recursion_To_Hand`
 - **Wake the Dead** via `Reanimation` | also: Enabler, Finisher
-- **Whisper, Blood Liturgist** via `Reanimation` | also: Enabler
+- **Whisper, Blood Liturgist** via `Reanimation` | also: Enabler, Engine
 
-### Finisher (13 cards)
+### Finisher (14 cards)
 
+- **Bolas's Citadel** via `Life_Drain + Sacrifice_Outlet` | also: Conversion, Enabler, Engine
 - **Bubbling Cauldron** via `Life_Drain + Sacrifice_Outlet` | also: Enabler
 - **Defiling Daemogoth** via `Life_Drain + X_Spell_Effect` | also: Payoff, Threat
 - **Exsanguinate** via `Life_Drain + X_Spell_Effect`
@@ -391,7 +402,7 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Diabolic Tutor** via `Tutor_Effect` | also: Card_Advantage, Enabler, Setup
 - **Evolving Wilds** via `Tutor_Effect` | also: Card_Advantage, Enabler, Mana_Acceleration, Setup
 - **Fabled Passage** via `Tutor_Effect` | also: Card_Advantage, Enabler, Mana_Acceleration, Setup
-- **Grim Servant** via `Tutor_Effect` | also: Card_Advantage, Enabler, Setup, Threat
+- **Grim Servant** via `Tutor_Effect` | also: Card_Advantage, Enabler, Setup
 - **Incarnation Technique** via `Self_Mill` | also: Enabler, Fuel, Recursion, Setup
 - **Insatiable Avarice** via `Tutor_Effect` | also: Card_Advantage, Enabler, Setup
 - **Liliana of the Dark Realms** via `Tutor_Effect` | also: Card_Advantage, Enabler, Mana_Acceleration, Setup
@@ -402,12 +413,12 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Park Map** via `Tutor_Effect` | also: Card_Advantage, Enabler, Mana_Acceleration, Setup
 - **Profane Tutor** via `Tutor_Effect` | also: Card_Advantage, Enabler, Setup
 - **Riveteers Overlook** via `Tutor_Effect` | also: Card_Advantage, Enabler, Mana_Acceleration, Setup
-- **Rune-Scarred Demon** via `Tutor_Effect` | also: Card_Advantage, Enabler, Setup, Threat
+- **Rune-Scarred Demon** via `Tutor_Effect` | also: Card_Advantage, Enabler, Setup
 - **Scarblade Scout** via `Self_Mill` | also: Enabler, Fuel, Setup
 - **Stitcher's Supplier** via `Self_Mill` | also: Enabler, Fuel, Setup
 - **Terramorphic Expanse** via `Tutor_Effect` | also: Card_Advantage, Enabler, Mana_Acceleration, Setup
 
-### Mana_Engine (12 cards)
+### Mana_Engine (13 cards)
 
 - **Ashnod's Altar** via `Mana_Production + Sacrifice_Outlet` | also: Conversion, Enabler, Engine, Mana_Acceleration
 - **Black Market** via `Mana_Production + Upkeep_Trigger` | also: Conversion, Engine, Mana_Acceleration, Payoff
@@ -418,6 +429,7 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Magus of the Coffers** via `Mana_Production + Permanent_Scaling` | also: Finisher_Support, Mana_Acceleration
 - **Nirkana Revenant** via `Mana_Multiplier` | also: Finisher_Support, Mana_Acceleration
 - **Pawn of Ulamog** via `Mana_Production + Sacrifice_Outlet` | also: Conversion, Enabler, Engine, Fuel, Mana_Acceleration, Payoff, Threat
+- **Priest of Forgotten Gods** via `Mana_Production + Sacrifice_Outlet` | also: Card_Advantage, Card_Draw, Conversion, Enabler, Engine, Mana_Acceleration
 - **Songs of the Damned** via `Mana_Production + Scales_With_Deaths` | also: Conversion, Engine, Mana_Acceleration, Payoff
 - **Treasure** via `Mana_Production + Sacrifice_Outlet` | also: Conversion, Enabler, Engine, Mana_Acceleration
 - **Vraska, Betrayal's Sting** via `Mana_Production + Sacrifice_Outlet` | also: Card_Advantage, Card_Draw, Conversion, Enabler, Engine, Finisher, Mana_Acceleration
@@ -452,7 +464,7 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Park Map** via `Search_For_Land` | also: Card_Advantage, Enabler, Finisher_Support, Setup
 - **Pawn of Ulamog** via `Mana_Production` | also: Conversion, Enabler, Engine, Fuel, Mana_Engine, Payoff, Threat
 - **Potioner's Trove** via `Mana_Production`
-- **Priest of Forgotten Gods** via `Mana_Production` | also: Card_Advantage, Card_Draw
+- **Priest of Forgotten Gods** via `Mana_Production` | also: Card_Advantage, Card_Draw, Conversion, Enabler, Engine, Mana_Engine
 - **Quest for the Necropolis** via `Cost_Reduction` | also: Enabler
 - **Riveteers Overlook** via `Search_For_Land` | also: Card_Advantage, Enabler, Finisher_Support, Setup
 - **Sol Ring** via `Mana_Production`
@@ -487,7 +499,7 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Hoarder's Greed** via `Draw_Effect` | also: Card_Advantage
 - **Indulgent Tormentor** via `Draw_Effect + Upkeep_Trigger` | also: Card_Advantage, Engine, Interaction, Payoff, Removal, Threat
 - **Infectious Inquiry** via `Draw_Effect` | also: Card_Advantage
-- **Massacre Girl, Known Killer** via `Draw_Effect` | also: Card_Advantage, Threat
+- **Massacre Girl, Known Killer** via `Draw_Effect` | also: Card_Advantage
 - **Midnight Reaper** via `Death_Trigger + Draw_Effect` | also: Card_Advantage, Conversion, Engine, Payoff
 - **Mind Stone** via `Draw_Effect` | also: Card_Advantage, Mana_Acceleration
 - **Morbid Opportunist** via `Death_Trigger + Draw_Effect` | also: Card_Advantage, Conversion, Engine, Payoff
@@ -498,14 +510,14 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Phyrexian Arena** via `Draw_Effect + Upkeep_Trigger` | also: Card_Advantage, Conversion, Engine, Payoff
 - **Phyrexian Gargantua** via `Draw_Effect` | also: Card_Advantage
 - **Plumb the Forbidden** via `Draw_Effect` | also: Card_Advantage, Conversion, Engine
-- **Priest of Forgotten Gods** via `Draw_Effect` | also: Card_Advantage, Mana_Acceleration
-- **Promise of Power** via `Draw_Effect` | also: Card_Advantage, Threat
+- **Priest of Forgotten Gods** via `Draw_Effect` | also: Card_Advantage, Conversion, Enabler, Engine, Mana_Acceleration, Mana_Engine
+- **Promise of Power** via `Draw_Effect` | also: Card_Advantage
 - **Read the Bones** via `Draw_Effect` | also: Card_Advantage
 - **Rogue's Gloves** via `Draw_Effect` | also: Card_Advantage, Payoff
 - **Sinister Gnarlbark** via `Draw_Effect + Upkeep_Trigger` | also: Card_Advantage, Engine, Payoff
 - **Skeletal Scrying** via `Draw_Effect` | also: Card_Advantage
 - **Skullclamp** via `Death_Trigger + Draw_Effect` | also: Card_Advantage, Conversion, Engine, Payoff
-- **Smothering Abomination** via `Draw_Effect + Upkeep_Trigger` | also: Card_Advantage, Engine, Payoff, Threat
+- **Smothering Abomination** via `Draw_Effect + Upkeep_Trigger` | also: Card_Advantage, Engine, Payoff
 - **Staff of Compleation** via `Draw_Effect` | also: Card_Advantage, Conversion, Engine, Interaction, Mana_Acceleration, Removal
 - **Strength-Testing Hammer** via `Draw_Effect` | also: Card_Advantage, Payoff
 - **Syphon Mind** via `Draw_Effect` | also: Card_Advantage
@@ -542,13 +554,13 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Evolving Wilds** via `Tutor_Effect` | also: Enabler, Finisher_Support, Mana_Acceleration, Setup
 - **Fabled Passage** via `Tutor_Effect` | also: Enabler, Finisher_Support, Mana_Acceleration, Setup
 - **Grim Haruspex** via `Death_Trigger + Draw_Effect` | also: Card_Draw, Conversion, Engine, Payoff
-- **Grim Servant** via `Tutor_Effect` | also: Enabler, Finisher_Support, Setup, Threat
+- **Grim Servant** via `Tutor_Effect` | also: Enabler, Finisher_Support, Setup
 - **Hoarder's Greed** via `Draw_Effect` | also: Card_Draw
 - **Indulgent Tormentor** via `Draw_Effect + Upkeep_Trigger` | also: Card_Draw, Engine, Interaction, Payoff, Removal, Threat
 - **Infectious Inquiry** via `Draw_Effect` | also: Card_Draw
 - **Insatiable Avarice** via `Tutor_Effect` | also: Enabler, Finisher_Support, Setup
 - **Liliana of the Dark Realms** via `Tutor_Effect` | also: Enabler, Finisher_Support, Mana_Acceleration, Setup
-- **Massacre Girl, Known Killer** via `Draw_Effect` | also: Card_Draw, Threat
+- **Massacre Girl, Known Killer** via `Draw_Effect` | also: Card_Draw
 - **Midnight Reaper** via `Death_Trigger + Draw_Effect` | also: Card_Draw, Conversion, Engine, Payoff
 - **Mind Stone** via `Draw_Effect` | also: Card_Draw, Mana_Acceleration
 - **Morbid Opportunist** via `Death_Trigger + Draw_Effect` | also: Card_Draw, Conversion, Engine, Payoff
@@ -561,17 +573,17 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Phyrexian Arena** via `Draw_Effect + Upkeep_Trigger` | also: Card_Draw, Conversion, Engine, Payoff
 - **Phyrexian Gargantua** via `Draw_Effect` | also: Card_Draw
 - **Plumb the Forbidden** via `Draw_Effect` | also: Card_Draw, Conversion, Engine
-- **Priest of Forgotten Gods** via `Draw_Effect` | also: Card_Draw, Mana_Acceleration
+- **Priest of Forgotten Gods** via `Draw_Effect` | also: Card_Draw, Conversion, Enabler, Engine, Mana_Acceleration, Mana_Engine
 - **Profane Tutor** via `Tutor_Effect` | also: Enabler, Finisher_Support, Setup
-- **Promise of Power** via `Draw_Effect` | also: Card_Draw, Threat
+- **Promise of Power** via `Draw_Effect` | also: Card_Draw
 - **Read the Bones** via `Draw_Effect` | also: Card_Draw
 - **Riveteers Overlook** via `Tutor_Effect` | also: Enabler, Finisher_Support, Mana_Acceleration, Setup
 - **Rogue's Gloves** via `Draw_Effect` | also: Card_Draw, Payoff
-- **Rune-Scarred Demon** via `Tutor_Effect` | also: Enabler, Finisher_Support, Setup, Threat
+- **Rune-Scarred Demon** via `Tutor_Effect` | also: Enabler, Finisher_Support, Setup
 - **Sinister Gnarlbark** via `Draw_Effect + Upkeep_Trigger` | also: Card_Draw, Engine, Payoff
 - **Skeletal Scrying** via `Draw_Effect` | also: Card_Draw
 - **Skullclamp** via `Death_Trigger + Draw_Effect` | also: Card_Draw, Conversion, Engine, Payoff
-- **Smothering Abomination** via `Draw_Effect + Upkeep_Trigger` | also: Card_Draw, Engine, Payoff, Threat
+- **Smothering Abomination** via `Draw_Effect + Upkeep_Trigger` | also: Card_Draw, Engine, Payoff
 - **Staff of Compleation** via `Draw_Effect` | also: Card_Draw, Conversion, Engine, Interaction, Mana_Acceleration, Removal
 - **Strength-Testing Hammer** via `Draw_Effect` | also: Card_Draw, Payoff
 - **Syphon Mind** via `Draw_Effect` | also: Card_Draw
@@ -583,7 +595,7 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Vraska, Betrayal's Sting** via `Draw_Effect` | also: Card_Draw, Conversion, Enabler, Engine, Finisher, Mana_Acceleration, Mana_Engine
 - **Yawgmoth, Thran Physician** via `Draw_Effect` | also: Card_Draw, Conversion, Enabler, Engine
 
-### Enabler (67 cards)
+### Enabler (69 cards)
 
 - **Animate Dead** via `Reanimation` | also: Recursion
 - **Ashnod's Altar** via `Sacrifice_Outlet` | also: Conversion, Engine, Mana_Acceleration, Mana_Engine
@@ -591,6 +603,7 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Blood Speaker** via `Tutor_Effect` | also: Card_Advantage, Finisher_Support, Fuel, Recursion, Setup
 - **Bloodghast** via `Reanimation` | also: Fuel, Recursion
 - **Bogbrew Witch** via `Tutor_Effect` | also: Card_Advantage, Finisher_Support, Setup
+- **Bolas's Citadel** via `Sacrifice_Outlet` | also: Conversion, Engine, Finisher
 - **Bubbling Cauldron** via `Sacrifice_Outlet` | also: Finisher
 - **Buried Alive** via `Tutor_Effect` | also: Card_Advantage, Finisher_Support, Setup
 - **Burnished Hart** via `Tutor_Effect` | also: Card_Advantage, Finisher_Support, Mana_Acceleration, Setup
@@ -605,12 +618,12 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Erebos, Bleak-Hearted** via `Sacrifice_Outlet` | also: Card_Advantage, Card_Draw, Conversion, Engine, Payoff
 - **Evolving Wilds** via `Tutor_Effect` | also: Card_Advantage, Finisher_Support, Mana_Acceleration, Setup
 - **Fabled Passage** via `Tutor_Effect` | also: Card_Advantage, Finisher_Support, Mana_Acceleration, Setup
-- **Flesh Carver** via `Sacrifice_Outlet` | also: Threat
+- **Flesh Carver** via `Sacrifice_Outlet`
 - **Ghoulcaller Gisa** via `Sacrifice_Outlet` | also: Conversion, Engine, Fuel, Threat
 - **Gisa, Glorious Resurrector** via `Mass_Reanimate` | also: Finisher, Recursion
 - **Gnawing Zombie** via `Sacrifice_Outlet` | also: Finisher
-- **Gravewaker** via `Reanimation` | also: Recursion, Threat
-- **Grim Servant** via `Tutor_Effect` | also: Card_Advantage, Finisher_Support, Setup, Threat
+- **Gravewaker** via `Reanimation` | also: Recursion
+- **Grim Servant** via `Tutor_Effect` | also: Card_Advantage, Finisher_Support, Setup
 - **Hell's Caretaker** via `Sacrifice_Outlet` | also: Engine, Recursion
 - **High Market** via `Sacrifice_Outlet`
 - **Incarnation Technique** via `Self_Mill` | also: Finisher_Support, Fuel, Recursion, Setup
@@ -623,19 +636,20 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Living Death** via `Mass_Reanimate` | also: Finisher, Recursion
 - **Moseo, Vein's New Dean** via `Reanimation` | also: Engine, Fuel, Payoff, Recursion, Threat
 - **Myriad Landscape** via `Tutor_Effect` | also: Card_Advantage, Finisher_Support, Mana_Acceleration, Setup
-- **Nether Traitor** via `Reanimation` | also: Fuel, Recursion, Threat
+- **Nether Traitor** via `Reanimation` | also: Fuel, Recursion
 - **Ob Nixilis of the Black Oath** via `Sacrifice_Outlet` | also: Card_Advantage, Card_Draw, Conversion, Engine, Finisher, Fuel, Threat
 - **Park Map** via `Tutor_Effect` | also: Card_Advantage, Finisher_Support, Mana_Acceleration, Setup
 - **Pawn of Ulamog** via `Sacrifice_Outlet` | also: Conversion, Engine, Fuel, Mana_Acceleration, Mana_Engine, Payoff, Threat
 - **Persist** via `Reanimation` | also: Recursion
 - **Phyrexian Ghoul** via `Sacrifice_Outlet`
+- **Priest of Forgotten Gods** via `Sacrifice_Outlet` | also: Card_Advantage, Card_Draw, Conversion, Engine, Mana_Acceleration, Mana_Engine
 - **Profane Command** via `Reanimation` | also: Finisher, Recursion, Threat
 - **Profane Tutor** via `Tutor_Effect` | also: Card_Advantage, Finisher_Support, Setup
 - **Quest for the Necropolis** via `Cost_Reduction` | also: Mana_Acceleration
 - **Reassembling Skeleton** via `Reanimation` | also: Fuel, Recursion
 - **Rise of the Dark Realms** via `Mass_Reanimate` | also: Finisher, Recursion
 - **Riveteers Overlook** via `Tutor_Effect` | also: Card_Advantage, Finisher_Support, Mana_Acceleration, Setup
-- **Rune-Scarred Demon** via `Tutor_Effect` | also: Card_Advantage, Finisher_Support, Setup, Threat
+- **Rune-Scarred Demon** via `Tutor_Effect` | also: Card_Advantage, Finisher_Support, Setup
 - **Scarblade Scout** via `Self_Mill` | also: Finisher_Support, Fuel, Setup
 - **Sheoldred, Whispering One** via `Reanimation` | also: Engine, Interaction, Recursion, Removal, Threat
 - **Stitch Together** via `Reanimation` | also: Recursion
@@ -648,7 +662,7 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Viscera Seer** via `Sacrifice_Outlet`
 - **Vraska, Betrayal's Sting** via `Sacrifice_Outlet` | also: Card_Advantage, Card_Draw, Conversion, Engine, Finisher, Mana_Acceleration, Mana_Engine
 - **Wake the Dead** via `Reanimation` | also: Finisher, Recursion
-- **Whisper, Blood Liturgist** via `Reanimation` | also: Recursion
+- **Whisper, Blood Liturgist** via `Sacrifice_Outlet` | also: Engine, Recursion
 - **Woe Strider** via `Sacrifice_Outlet` | also: Conversion, Engine, Fuel, Threat
 - **Yahenni, Undying Partisan** via `Sacrifice_Outlet` | also: Protection
 - **Yawgmoth, Thran Physician** via `Sacrifice_Outlet` | also: Card_Advantage, Card_Draw, Conversion, Engine
@@ -664,7 +678,7 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Diabolic Tutor** via `Tutor_Effect` | also: Card_Advantage, Enabler, Finisher_Support
 - **Evolving Wilds** via `Tutor_Effect` | also: Card_Advantage, Enabler, Finisher_Support, Mana_Acceleration
 - **Fabled Passage** via `Tutor_Effect` | also: Card_Advantage, Enabler, Finisher_Support, Mana_Acceleration
-- **Grim Servant** via `Tutor_Effect` | also: Card_Advantage, Enabler, Finisher_Support, Threat
+- **Grim Servant** via `Tutor_Effect` | also: Card_Advantage, Enabler, Finisher_Support
 - **Incarnation Technique** via `Self_Mill` | also: Enabler, Finisher_Support, Fuel, Recursion
 - **Insatiable Avarice** via `Tutor_Effect` | also: Card_Advantage, Enabler, Finisher_Support
 - **Liliana of the Dark Realms** via `Tutor_Effect` | also: Card_Advantage, Enabler, Finisher_Support, Mana_Acceleration
@@ -673,7 +687,7 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Park Map** via `Tutor_Effect` | also: Card_Advantage, Enabler, Finisher_Support, Mana_Acceleration
 - **Profane Tutor** via `Tutor_Effect` | also: Card_Advantage, Enabler, Finisher_Support
 - **Riveteers Overlook** via `Tutor_Effect` | also: Card_Advantage, Enabler, Finisher_Support, Mana_Acceleration
-- **Rune-Scarred Demon** via `Tutor_Effect` | also: Card_Advantage, Enabler, Finisher_Support, Threat
+- **Rune-Scarred Demon** via `Tutor_Effect` | also: Card_Advantage, Enabler, Finisher_Support
 - **Scarblade Scout** via `Self_Mill` | also: Enabler, Finisher_Support, Fuel
 - **Stitcher's Supplier** via `Self_Mill` | also: Enabler, Finisher_Support, Fuel
 - **Terramorphic Expanse** via `Tutor_Effect` | also: Card_Advantage, Enabler, Finisher_Support, Mana_Acceleration
@@ -695,7 +709,7 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Final Act** via `Board_Wipe` | also: Interaction
 - **Fleshbag Marauder** via `Forced_Sacrifice` | also: Interaction, Payoff, Threat
 - **Grave Pact** via `Forced_Sacrifice` | also: Engine, Interaction, Threat
-- **Havoc Demon** via `Board_Wipe` | also: Interaction, Threat
+- **Havoc Demon** via `Board_Wipe` | also: Interaction
 - **Hero's Downfall** via `Targeted_Removal` | also: Interaction
 - **Honored Heirloom** via `Graveyard_Hate` | also: Interaction, Mana_Acceleration
 - **Indulgent Tormentor** via `Forced_Sacrifice` | also: Card_Advantage, Card_Draw, Engine, Interaction, Payoff, Threat
@@ -714,8 +728,8 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Murderous Rider // Swift End** via `Targeted_Removal` | also: Interaction
 - **Mutilate** via `Board_Wipe` | also: Interaction
 - **Necromantic Selection** via `Board_Wipe` | also: Interaction
-- **Overseer of the Damned** via `Targeted_Removal` | also: Interaction, Threat
-- **Pestilence Demon** via `Damage_Effect` | also: Threat
+- **Overseer of the Damned** via `Targeted_Removal` | also: Interaction
+- **Pestilence Demon** via `Damage_Effect`
 - **Plaguecrafter** via `Forced_Sacrifice` | also: Interaction, Payoff, Threat
 - **Ravenous Chupacabra** via `Targeted_Removal` | also: Interaction
 - **Requiting Hex** via `Targeted_Removal` | also: Interaction
@@ -746,7 +760,7 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Final Act** via `Board_Wipe` | also: Removal
 - **Fleshbag Marauder** via `Forced_Sacrifice` | also: Payoff, Removal, Threat
 - **Grave Pact** via `Forced_Sacrifice` | also: Engine, Removal, Threat
-- **Havoc Demon** via `Board_Wipe` | also: Removal, Threat
+- **Havoc Demon** via `Board_Wipe` | also: Removal
 - **Hero's Downfall** via `Targeted_Removal` | also: Removal
 - **Honored Heirloom** via `Graveyard_Hate` | also: Mana_Acceleration, Removal
 - **Indulgent Tormentor** via `Forced_Sacrifice` | also: Card_Advantage, Card_Draw, Engine, Payoff, Removal, Threat
@@ -765,7 +779,7 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Murderous Rider // Swift End** via `Targeted_Removal` | also: Removal
 - **Mutilate** via `Board_Wipe` | also: Removal
 - **Necromantic Selection** via `Board_Wipe` | also: Removal
-- **Overseer of the Damned** via `Targeted_Removal` | also: Removal, Threat
+- **Overseer of the Damned** via `Targeted_Removal` | also: Removal
 - **Plaguecrafter** via `Forced_Sacrifice` | also: Payoff, Removal, Threat
 - **Ravenous Chupacabra** via `Targeted_Removal` | also: Removal
 - **Requiting Hex** via `Targeted_Removal` | also: Removal
@@ -777,81 +791,48 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Witch of the Moors** via `Forced_Sacrifice` | also: Removal, Threat
 - **Woebringer Demon** via `Forced_Sacrifice` | also: Removal, Threat
 
-### Threat (74 cards)
+### Threat (41 cards)
 
-- **Abyssal Persecutor** via `Evasion`
 - **Accursed Marauder** via `ETB_Trigger + Forced_Sacrifice` | also: Interaction, Payoff, Removal
-- **Archfiend of Ifnir** via `Evasion`
-- **Archfiend of the Dross** via `Evasion`
 - **Archon of Cruelty** via `ETB_Trigger + Forced_Sacrifice` | also: Card_Advantage, Card_Draw, Engine, Interaction, Payoff, Removal
-- **Blight Mound** via `Evasion` | also: Conversion, Fuel, Payoff
 - **Blighted Blackthorn** via `ETB_Trigger + Life_Drain` | also: Card_Advantage, Card_Draw, Conversion, Engine, Payoff
 - **Blood Artist** via `Death_Trigger + Life_Drain` | also: Payoff
 - **Bloodgift Demon** via `Evasion + Life_Drain` | also: Payoff
 - **Braids, Arisen Nightmare** via `Forced_Sacrifice + Upkeep_Trigger` | also: Card_Advantage, Card_Draw, Engine, Interaction, Payoff, Removal
 - **Butcher of Malakir** via `Death_Trigger + Forced_Sacrifice` | also: Engine, Interaction, Removal
-- **Carnifex Demon** via `Evasion`
 - **Dawnhand Eulogist** via `Evasion + Life_Drain` | also: Enabler, Finisher_Support, Fuel, Payoff, Setup
-- **Deathgaze Cockatrice** via `Evasion`
 - **Defiling Daemogoth** via `Combat_Trigger + Evasion` | also: Finisher, Payoff
-- **Demon of Catastrophes** via `Evasion`
 - **Demon of Wailing Agonies** via `Combat_Trigger + Evasion` | also: Interaction, Removal
-- **Drana, Kalastria Bloodchief** via `Evasion`
 - **Drana, the Last Bloodchief** via `Combat_Trigger + Evasion`
 - **Falkenrath Noble** via `Evasion + Life_Drain` | also: Payoff
-- **Flesh Carver** via `Evasion` | also: Enabler
 - **Fleshbag Marauder** via `ETB_Trigger + Forced_Sacrifice` | also: Interaction, Payoff, Removal
 - **Ghoulcaller Gisa** via `Sacrifice_Outlet + Token_Generation` | also: Conversion, Enabler, Engine, Fuel
-- **God-Eternal Bontu** via `Evasion`
 - **Grave Pact** via `Death_Trigger + Forced_Sacrifice` | also: Engine, Interaction, Removal
 - **Grave Titan** via `Combat_Trigger + Deathtouch` | also: Fuel, Payoff
 - **Grave Venerations** via `Death_Trigger + Life_Drain` | also: Payoff
-- **Gravewaker** via `Evasion` | also: Enabler, Recursion
 - **Gray Merchant of Asphodel** via `ETB_Trigger + Life_Drain` | also: Finisher, Payoff
-- **Grim Servant** via `Evasion` | also: Card_Advantage, Enabler, Finisher_Support, Setup
-- **Havoc Demon** via `Evasion` | also: Interaction, Removal
 - **Indulgent Tormentor** via `Forced_Sacrifice + Upkeep_Trigger` | also: Card_Advantage, Card_Draw, Engine, Interaction, Payoff, Removal
 - **Liliana's Reaver** via `Combat_Trigger + Deathtouch` | also: Interaction, Removal
-- **Massacre Girl, Known Killer** via `Evasion` | also: Card_Advantage, Card_Draw
 - **Merchant of Venom** via `ETB_Trigger + Forced_Sacrifice` | also: Interaction, Payoff, Removal
 - **Merciless Executioner** via `ETB_Trigger + Forced_Sacrifice` | also: Interaction, Payoff, Removal
 - **Mirkwood Bats** via `Evasion + Life_Drain`
-- **Moonshadow** via `Evasion`
 - **Moseo, Vein's New Dean** via `Combat_Trigger + Evasion` | also: Enabler, Engine, Fuel, Payoff, Recursion
 - **Necropolis Regent** via `Combat_Trigger + Evasion`
-- **Nether Traitor** via `Evasion` | also: Enabler, Fuel, Recursion
-- **Nightwing Shade** via `Evasion`
 - **Ob Nixilis of the Black Oath** via `Evasion + Life_Drain` | also: Card_Advantage, Card_Draw, Conversion, Enabler, Engine, Finisher, Fuel
-- **Overseer of the Damned** via `Evasion` | also: Interaction, Removal
 - **Pawn of Ulamog** via `Sacrifice_Outlet + Token_Generation` | also: Conversion, Enabler, Engine, Fuel, Mana_Acceleration, Mana_Engine, Payoff
-- **Pestilence Demon** via `Evasion` | also: Removal
 - **Plaguecrafter** via `ETB_Trigger + Forced_Sacrifice` | also: Interaction, Payoff, Removal
 - **Profane Command** via `Evasion + Life_Drain` | also: Enabler, Finisher, Recursion
-- **Promise of Power** via `Evasion` | also: Card_Advantage, Card_Draw
-- **Puppeteer Clique** via `Evasion` | also: Fuel
 - **Raving Dead** via `Combat_Trigger + Deathtouch`
-- **Reaper from the Abyss** via `Evasion`
-- **Rune-Scarred Demon** via `Evasion` | also: Card_Advantage, Enabler, Finisher_Support, Setup
-- **Sengir Vampire** via `Evasion`
-- **Sepulchral Primordial** via `Evasion`
 - **Sheoldred, Whispering One** via `Forced_Sacrifice + Upkeep_Trigger` | also: Enabler, Engine, Interaction, Recursion, Removal
-- **Shriekmaw** via `Evasion`
-- **Skirsdag High Priest** via `Evasion` | also: Fuel
 - **Skymarch Bloodletter** via `Evasion + Life_Drain` | also: Payoff
-- **Smothering Abomination** via `Evasion` | also: Card_Advantage, Card_Draw, Engine, Payoff
 - **Sneering Shadewriter** via `Evasion + Life_Drain` | also: Payoff
 - **Stensian Sanguinist // Exsanguinate** via `Combat_Trigger + Deathtouch` | also: Finisher, Payoff
 - **Taborax, Hope's Demise** via `Evasion + Lifelink` | also: Card_Advantage, Card_Draw, Conversion, Engine, Payoff
-- **The Black Gate** via `Evasion` | also: Conversion, Engine
-- **The Superlatorium** via `Evasion` | also: Fuel
-- **Tomb of Annihilation** via `Evasion`
 - **Vampire Sovereign** via `Evasion + Life_Drain` | also: Payoff
-- **Veinwitch Coven** via `Evasion` | also: Recursion
 - **Vraan, Executioner Thane** via `Death_Trigger + Life_Drain` | also: Payoff
 - **Witch of the Moors** via `Forced_Sacrifice + Upkeep_Trigger` | also: Interaction, Removal
 - **Woe Strider** via `Sacrifice_Outlet + Token_Generation` | also: Conversion, Enabler, Engine, Fuel
 - **Woebringer Demon** via `Forced_Sacrifice + Upkeep_Trigger` | also: Interaction, Removal
-- **Xathrid Demon** via `Evasion`
 - **Zulaport Cutthroat** via `Death_Trigger + Life_Drain` | also: Payoff
 
 ### Protection (5 cards)
@@ -862,13 +843,16 @@ Rules fire when a card's mechanical tags satisfy the required set.
 - **Swiftfoot Boots** via `Protection_Effect`
 - **Yahenni, Undying Partisan** via `Protection_Effect` | also: Enabler
 
-## No Functional Role (107 cards)
+## No Functional Role (122 cards)
 
 These have no mechanical tags, or only tags not yet covered by functional rules.
 
 - Aberrant Return [*(no mechanical tags)*]
+- Abyssal Persecutor [Evasion]
 - Accorder's Shield [*(no mechanical tags)*]
 - Aether Snap [*(no mechanical tags)*]
+- Archfiend of Ifnir [Evasion]
+- Archfiend of the Dross [Evasion, Upkeep_Trigger]
 - Arisen Gorgon [Deathtouch]
 - Ashes to Ashes [*(no mechanical tags)*]
 - Bad Moon [*(no mechanical tags)*]
@@ -881,8 +865,8 @@ These have no mechanical tags, or only tags not yet covered by functional rules.
 - Blowfly Infestation [Death_Trigger]
 - Boggart Prankster [Combat_Trigger]
 - Bojuka Bog [ETB_Trigger]
-- Bolas's Citadel [Life_Drain]
 - Burrog Banemaker [Deathtouch]
+- Carnifex Demon [Evasion]
 - Child of Night [Lifelink]
 - Chimil, the Inner Sun [Upkeep_Trigger]
 - Command Tower [*(no mechanical tags)*]
@@ -893,7 +877,4 @@ These have no mechanical tags, or only tags not yet covered by functional rules.
 - Crumbling Colossus [*(no mechanical tags)*]
 - Curse of Shallow Graves [*(no mechanical tags)*]
 - Dance of the Dead [ETB_Trigger]
-- Dark Confidant [Upkeep_Trigger]
-- Diregraf Ghoul [*(no mechanical tags)*]
-- Dreadhorde Invasion [Lifelink, Upkeep_Trigger]
-- ... and 77 more
+- ... and 92 more

@@ -1,6 +1,6 @@
 # Anchor Card Validation
 
-**Run:** 2026-05-30 14:15
+**Run:** 2026-05-30 14:32
 
 Cards that define the deck's strategic identity. Missing tags here are high-priority gaps.
 
@@ -39,7 +39,7 @@ Cards that define the deck's strategic identity. Missing tags here are high-prio
 
 ## Bolas's Citadel — ✓ OK
 - Expected: ['Life_Drain']
-- Actual: ['Life_Drain']
+- Actual: ['Life_Drain', 'Life_Payment', 'Sacrifice_Outlet']
 
 ## Phyrexian Arena — ✓ OK
 - Expected: ['Draw_Effect']

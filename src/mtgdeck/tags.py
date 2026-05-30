@@ -253,9 +253,17 @@ _MECHANICAL_PATTERNS: list[tuple[str, str, float, str]] = [
     # Pattern 1: "Return target creature card from a graveyard to the battlefield"
     ("Reanimation",       r"return .{1,80}graveyard to the battlefield", 1.0,
         "mechanical.reanimation.graveyard_to_battlefield.v1"),
-    # Pattern 2: Aura-based reanimate (Animate Dead, Dance of the Dead)
+    # Pattern 2: Aura-based reanimate (Animate Dead) — "return enchanted creature card to the battlefield"
     ("Reanimation",       r"return enchanted creature card to the battlefield", 0.95,
         "mechanical.reanimation.aura_enchanted_card.v1"),
+    # Pattern 3: Dance of the Dead — "put enchanted creature card onto the battlefield"
+    # Oracle wording differs from Animate Dead: uses "put ... onto" instead of "return ... to".
+    ("Reanimation",       r"put enchanted creature card onto the battlefield", 0.95,
+        "mechanical.reanimation.aura_put_enchanted_onto.v1"),
+    # Pattern 4: Victimize — "return the chosen cards to the battlefield"
+    # Graveyard context is in the preceding clause; "return the chosen cards" is the effect.
+    ("Reanimation",       r"return the chosen cards? to the battlefield", 0.90,
+        "mechanical.reanimation.return_chosen_to_battlefield.v1"),
 
     # Mass reanimation — returns many creatures at once
     # Living Death: "puts all cards they exiled this way onto the battlefield"
@@ -305,6 +313,11 @@ _MECHANICAL_PATTERNS: list[tuple[str, str, float, str]] = [
         "mechanical.mana_production.add_color_symbol.v1"),
     ("Mana_Production",   r"add (?:one|two|three) mana", 0.9,
         "mechanical.mana_production.add_word_mana.v1"),
+    # Devotion-based mana (Nyx Lotus, Nykthos) — "add an amount of mana ... equal to your devotion"
+    # The existing add_{symbol} and add_{word} patterns miss this because neither a mana symbol
+    # nor a word-number appears in the oracle text for devotion producers.
+    ("Mana_Production",   r"add an amount of mana", 0.90,
+        "mechanical.mana_production.add_amount_of_mana.v1"),
 
     # Tutors
     ("Tutor_Effect",      r"search your library for (?:a |an |any |up to )", 1.0,
@@ -433,6 +446,10 @@ _MECHANICAL_PATTERNS: list[tuple[str, str, float, str]] = [
         "mechanical.targeted_removal.destroy_target.v1"),
     ("Targeted_Removal",  r"exile target (?:\w+ )?(?:creature|permanent|artifact|enchantment|planeswalker)", 1.0,
         "mechanical.targeted_removal.exile_target.v1"),
+    # Stat-based targeted removal — "-X/-X until end of turn" (Tragic Slip morbid mode, etc.)
+    # -1/-1 alone is weak but Tragic Slip's morbid becomes -13/-13 — still functionally removal.
+    ("Targeted_Removal",  r"target creature gets -\w+/-\w+ until end of turn", 0.85,
+        "mechanical.targeted_removal.minus_stats_until_eot.v1"),
 
     # Damage
     ("Damage_Effect",     r"deals? \w+ damage to (?:any target|target creature|each creature|each player|each opponent)", 0.9,

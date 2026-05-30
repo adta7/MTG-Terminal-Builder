@@ -1,6 +1,6 @@
 # Collection Scan — Summary
 
-**Run:** 2026-05-30 14:15
+**Run:** 2026-05-30 14:32
 
 ## Import
 - Cards loaded: 347 unique black/colorless
@@ -10,7 +10,7 @@
 ## Coverage
 - Tagged: 280/347 (80%)
 - Untagged: 67/347 (19%)
-- Coverage gaps (zero-tag cards): 204
+- Coverage gaps (zero-tag cards): 202
 
 ## Anchor Cards
 - 12/12 owned anchors fully tagged  (12/15 anchors in collection)
@@ -23,16 +23,16 @@
 - Life_Gain: 34
 - Upkeep_Trigger: 29
 - Mana_Production: 28
+- Sacrifice_Outlet: 24
 - Token_Generation: 23
-- Sacrifice_Outlet: 21
 - Death_Trigger: 21
 - Reanimation: 19
 - Targeted_Removal: 19
 - Tutor_Effect: 17
 - Combat_Trigger: 15
 - Forced_Sacrifice: 14
+- Life_Payment: 14
 - Self_Death_Trigger: 14
-- Life_Payment: 13
 - Recursion_To_Hand: 12
 - Deathtouch: 12
 - Board_Wipe: 8

@@ -1,120 +1,140 @@
-# Deck Gap Analysis — Bahahahah (Sheoldred, Whispering One)
+# Deck Gap Analysis — Bahahahah
 
+**Commander:** Sheoldred, Whispering One  
 **Date:** 2026-05-30  
-**Cards in list:** 87 / 99  
-**Source:** Functional role derivation on collection scan DB
+**Phase:** 6B — Structural Deck Diagnostics
 
 ---
 
-## Primary Finding: Land Shortage
+## Structural Status
 
-The 87-card list has only **10 lands** — a complete Commander deck needs 35–38.
+**`NOT READY FOR FINAL ROLE EVALUATION`**
 
 | Metric | Current | Target |
 |--------|---------|--------|
-| Total cards | 87 | 99 |
-| Lands | 10 | 36–38 |
-| Nonland spells | 77 | ~61 |
-| Cards to add | 12 | — |
-| Nonlands to cut | ~16 | — |
-| Lands still needed | ~28 | — |
+| Deck size | 87 | 100 |
+| Lands | 10 | 36–37 |
+| Nonlands | 77 | ~64 |
+| Lands needed | 26 | — |
+| Nonland cuts after adding lands | ~13 | — |
 
-**The deck needs approximately 28 Swamps/utility lands and ~16 nonland cuts.**
+> **Note:** Role counts below are DIAGNOSTIC ONLY.
+> They are inflated because the deck has too many nonlands relative to lands.
+> Do not treat them as final until the deck reaches 100 cards with 36+ lands.
 
----
+Reasons:
 
-## Mana Curve (77 nonland spells)
-
-| CMC | Count |
-|-----|-------|
-| 1 | 9 |
-| 2 | 27 |
-| 3 | 15 |
-| 4 | 11 |
-| 5 | 6 |
-| 6 | 3 |
-| 7+ | 6 |
-
-**CMC ≤ 3: 51/77 (66%)** — curve is healthy. CMC 7+ has 6 cards — 1–2 more than optimal for midrange.
+- `deck_below_100_cards`
+- `land_count_below_minimum`
 
 ---
 
-## Functional Role Counts vs Targets
+## Role Counts vs Targets
+(Diagnostic only)
 
 | Role | Have | Ideal | Status |
 |------|------|-------|--------|
-| Engine | 28 | 10–16 | HIGH |
-| Enabler | 30 | 7–12 | HIGH |
-| Payoff | 20 | 6–10 | HIGH |
-| Conversion | 20 | 5–8 | HIGH |
-| Fuel | 15 | 5–8 | HIGH |
-| Recursion | 14 | 6–9 | HIGH |
-| Threat | 16 | 6–10 | HIGH |
-| Mana_Engine | 7 | 2–4 | HIGH |
-| Card_Draw | 14 | 9–12 | SLIGHTLY HIGH |
-| Removal | 13 | 9–12 | SLIGHTLY HIGH |
-| Interaction | 12 | 6–9 | SLIGHTLY HIGH |
-| Mana_Acceleration | 15 | 11–14 | SLIGHTLY HIGH |
 | Finisher | 5 | 3–6 | OK |
 | Setup | 6 | 4–7 | OK |
 | Protection | 2 | 2–4 | OK |
-
-**No functional gaps.** The deck is over-full across every role. Once ~16 nonland
-spells are cut to make room for 28+ lands, role counts will normalize into range.
-
----
-
-## System Blind Spots (7 cards the tagger doesn't fully understand yet)
-
-| Card | CMC | Real role | Layer 2 gap |
-|------|-----|-----------|-------------|
-| Tragic Slip | 1 | Removal | No pattern for -X/-X targeted removal |
-| Dance of the Dead | 2 | Recursion | "put onto battlefield" vs. "return to battlefield" |
-| Victimize | 3 | Recursion | Graveyard word separated from "return to battlefield" |
-| Nyx Lotus | 4 | Mana_Acceleration | Devotion-based mana not tagged as Mana_Production |
-| Lashwrithe | 4 | Threat/Finisher | Permanent_Scaling alone has no functional rule |
-| Sudden Spoiling | 3 | Interaction | Flash + split second effect, no pattern |
-| Prowling Geistcatcher | 5 | Fuel/Recursion | Complex sac-trigger, no pattern |
-
-These are all real cards doing real work. The system just doesn't see them yet.
+| Mana_Acceleration | 16 | 11–14 | SLIGHTLY HIGH |
+| Card_Draw | 14 | 9–12 | SLIGHTLY HIGH |
+| Mana_Engine | 7 | 2–4 | HIGH |
+| Removal | 15 | 9–12 | HIGH |
+| Engine | 28 | 10–16 | HIGH |
+| Payoff | 20 | 6–10 | HIGH |
+| Fuel | 15 | 5–8 | HIGH |
+| Recursion | 16 | 6–9 | HIGH |
+| Conversion | 20 | 5–8 | HIGH |
+| Enabler | 32 | 7–12 | HIGH |
+| Interaction | 14 | 6–9 | HIGH |
+| Threat | 16 | 6–10 | HIGH |
 
 ---
 
-## Cut Candidates (weakest functional profiles)
+## Gaps to Fill
 
-When freeing slots for lands, cut these first:
-
-| Card | CMC | Roles | Why |
-|------|-----|-------|-----|
-| Overseer of the Damned | 7 | Interaction, Removal | Expensive single-use |
-| Lashwrithe | 4 | *(none)* | System-blind, equipment slot |
-| Nyx Lotus | 4 | *(none)* | Enters tapped, slow, inconsistent |
-| Prowling Geistcatcher | 5 | *(none)* | Complex, niche |
-| Syr Konrad, the Grim | 5 | Removal | Only 1 role for a 5-drop |
-| K'rrik, Son of Yawgmoth | 7 | Conversion, Engine | Redundant with Sheoldred at 7 |
-
-**Keep (highest functional value):**  
-Archon of Cruelty (7 roles), Yawgmoth (5), Erebos (5), Bolas's Citadel (4), Black Market (5)
+No critical or low roles found.
 
 ---
 
-## "Hand Feels Sad by Turn 5" Diagnosis
+## Mana Curve (nonland spells)
 
-1. **Incomplete land base** — test games without proper 36-land base feel wrong
-2. **6 cards at CMC 7+** — drawing multiple clogs the hand early
-3. **14 Recursion + 15 Fuel** — pieces that need other pieces to enable value; less action in isolation
-
-**Fix:** Full 36-land base, cut 2–3 of the 7+ CMC cards, ensure 3–4 CMC ≤ 2 draw spells.
+- CMC 0: 0  
+- CMC 1: 9  █████████
+- CMC 2: 27  ███████████████████████████
+- CMC 3: 15  ███████████████
+- CMC 4: 11  ███████████
+- CMC 5: 6  ██████
+- CMC 6: 3  ███
+- CMC 7+: 6  ██████
 
 ---
 
-## Summary
+## Cut Candidate Classification
 
-This deck has the right strategic identity: mono-black aristocrats/reanimator with deep
-sacrifice, death-trigger payoffs, recursion, and mana engines. No wrong cards, just a
-draft list that needs its land base and final cuts.
+Cards are sorted into four categories. A 0-role card is never a cut candidate
+until it has passed through the blind-spot check.
 
-**Next steps:**
-1. Add ~28 lands (basic Swamps + Crypt of Agadeem, Cabal Coffers, utility lands)
-2. Cut ~16 weakest nonlands (CMC 7+ excess, system-blind cards, redundant roles)
-3. Finalize to 99 and playtest
+### A. Unknown / Unclassified
+
+Cards with 0 functional roles and no known explanation.
+These are candidates for either a cut or a new rule.
+
+None.
+
+### B. Structural Cut Pressure
+
+Cards that may need to be cut because the deck needs lands — not because they are bad.
+Logic: CMC 6+ and at least one over-represented role.
+
+| Card | CMC | Over-represented roles |
+|------|-----|------------------------|
+| Archon of Cruelty | 8 | Engine, Threat, Interaction, Removal, Payoff, Card_Draw |
+| Butcher of Malakir | 7 | Threat, Engine, Interaction, Removal |
+| Overseer of the Damned | 7 | Interaction, Removal |
+| Rune-Scarred Demon | 7 | Enabler |
+| Sheoldred, Whispering One | 7 | Engine, Recursion, Enabler, Threat, Interaction, Removal |
+| Grave Titan | 6 | Payoff, Threat, Fuel |
+| Nirkana Revenant | 6 | Mana_Engine, Mana_Acceleration |
+
+### C. Parser Blind Spots
+
+**DO NOT cut based on current role score.**
+The system does not understand these cards yet.
+
+| Card | Expected roles | Gap | Status |
+|------|----------------|-----|--------|
+| Lashwrithe | Threat, Finisher | Permanent_Scaling alone has no Threat/Finisher rule; scaling equipment needs its own concept | needs_rule |
+| Prowling Geistcatcher | Fuel, Recursion | Complex sac-trigger delayed recursion/storage; no pattern covers this | needs_rule |
+| Sudden Spoiling | Interaction | Flash + split second prevention/combat blowout; no oracle pattern covers this | needs_rule |
+
+### D. Identity-Protected Cards
+
+Cards that may look inefficient but are intentionally expressive.
+They define how the deck feels to play. Do not cut without discussion.
+
+| Card | CMC | Functional tags |
+|------|-----|-----------------|
+| Black Market | 5 | Conversion, Engine, Mana_Acceleration, Mana_Engine, Payoff |
+| Bolas's Citadel | 6 | Conversion, Enabler, Engine, Finisher |
+| Ghoulcaller Gisa | 5 | Conversion, Enabler, Engine, Fuel, Threat |
+| K'rrik, Son of Yawgmoth | 7 | Conversion, Engine |
+| Living Death | 5 | Enabler, Finisher, Recursion |
+
+---
+
+## Parser Blind Spots (full list)
+
+Cards the system does not fully understand.
+Fixed in this phase are tagged `fixed_in_6B`. Still-open gaps are `needs_rule`.
+
+| Card | Expected role | Suspected gap | Status |
+|------|---------------|---------------|--------|
+| Tragic Slip | Removal | No -X/-X targeted removal pattern (fixed in 6B) | `fixed_in_6B` |
+| Dance of the Dead | Recursion | put enchanted creature onto battlefield vs return … to battlefield (fixed in 6B) | `fixed_in_6B` |
+| Victimize | Recursion | Graveyard context and return are in separate clauses (fixed in 6B) | `fixed_in_6B` |
+| Nyx Lotus | Mana_Acceleration | Devotion-based mana not matched by existing Mana_Production patterns (fixed in 6B) | `fixed_in_6B` |
+| Lashwrithe | Threat, Finisher | Permanent_Scaling alone has no Threat/Finisher rule; scaling equipment needs its own concept | `needs_rule` |
+| Sudden Spoiling | Interaction | Flash + split second prevention/combat blowout; no oracle pattern covers this | `needs_rule` |
+| Prowling Geistcatcher | Fuel, Recursion | Complex sac-trigger delayed recursion/storage; no pattern covers this | `needs_rule` |
