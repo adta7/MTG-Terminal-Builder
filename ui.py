@@ -287,22 +287,38 @@ def getch() -> str:
 
         if ch == b'\x1b':
             # ESC: check if this is an arrow key sequence or standalone ESC
-            # Use 200ms timeout for continuation bytes (allows inter-byte delays)
-            if select.select([sys.stdin], [], [], 0.2)[0]:
+            # Use 100ms timeout for continuation bytes
+            readable, _, _ = select.select([sys.stdin], [], [], 0.1)
+            if readable:
                 ch2 = sys.stdin.buffer.read(1)
                 if ch2 == b'[':
-                    # Check for arrow key continuation
-                    if select.select([sys.stdin], [], [], 0.2)[0]:
+                    # Standard CSI sequence (arrow keys)
+                    readable, _, _ = select.select([sys.stdin], [], [], 0.1)
+                    if readable:
                         ch3 = sys.stdin.buffer.read(1)
                         if ch3 == b'A':
                             return 'UP'
-                        if ch3 == b'B':
+                        elif ch3 == b'B':
                             return 'DOWN'
-                        if ch3 == b'C':
+                        elif ch3 == b'C':
                             return 'RIGHT'
-                        if ch3 == b'D':
+                        elif ch3 == b'D':
                             return 'LEFT'
-                # Unknown escape sequence - return ESC safely
+                elif ch2 == b'O':
+                    # Alternative SS3 sequence (some terminals)
+                    readable, _, _ = select.select([sys.stdin], [], [], 0.1)
+                    if readable:
+                        ch3 = sys.stdin.buffer.read(1)
+                        if ch3 == b'A':
+                            return 'UP'
+                        elif ch3 == b'B':
+                            return 'DOWN'
+                        elif ch3 == b'C':
+                            return 'RIGHT'
+                        elif ch3 == b'D':
+                            return 'LEFT'
+                # Unknown escape sequence - consume any pending bytes
+                # and return ESC
                 return 'ESC'
             # No continuation bytes - this was standalone ESC
             return 'ESC'
