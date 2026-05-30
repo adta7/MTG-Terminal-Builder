@@ -503,3 +503,69 @@ Interactive functions (anything using `input()`, `getch()`, `tty.setraw()`) can'
 - The terminal width is not fixed. Always read it at render time, not at startup.
 - `pbcopy` only works on Mac. If you ever share this across platforms, you'll need to detect the OS.
 - `difflib.get_close_matches` is surprisingly good for card name typos and handles things like "Lighthing Bolt" → "Lightning Bolt" correctly.
+
+---
+
+## 2026-05-27
+
+### Arrow Key Timeout on macOS: Don't Use `select()` Timeout for Continuation Bytes
+
+**Problem:** Arrow keys send three bytes: `\x1b [ A` (for UP). If you use `select.select([stdin], [], [], 0.05)` to wait for the second and third bytes, **the timeout may expire before those bytes arrive**, especially on macOS. This causes arrow keys to be misdetected as bare ESC.
+
+**Why it happens:** On some terminal emulators (iTerm2, Terminal.app), escape sequence bytes don't arrive immediately in sequence. They may take 100–500ms to arrive, well beyond typical 50ms timeouts.
+
+**Solution:** Use `select()` **only for the first byte**. After detecting `\x1b`, read the remaining bytes in **pure blocking mode without a timeout**:
+
+```python
+def getch() -> str:
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        
+        # Wait for FIRST byte with select (first byte timing is normal)
+        if not select.select([sys.stdin], [], [], 10)[0]:
+            return None
+        
+        ch = sys.stdin.buffer.read(1)
+        
+        if ch == b'\x1b':
+            # Read the NEXT bytes in blocking mode (no timeout)
+            # They WILL arrive eventually, just maybe slowly
+            ch2 = sys.stdin.buffer.read(1)
+            if ch2 == b'[':
+                ch3 = sys.stdin.buffer.read(1)
+                if ch3 == b'A': return 'UP'
+                if ch3 == b'B': return 'DOWN'
+                if ch3 == b'C': return 'RIGHT'
+                if ch3 == b'D': return 'LEFT'
+            return 'ESC'
+        
+        return ch.decode('utf-8', errors='replace')
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+```
+
+**Key insight:** Escape sequence continuation bytes aren't like the initial byte — users don't initiate them. The terminal generates them automatically after sending `\x1b`. So it's safe to wait for them in blocking mode. They **will** arrive.
+
+**Don't overcomplicate it:** Avoid `fcntl` non-blocking mode, retry loops, or multiple `select()` calls for continuation bytes. Just read them blocking. It works and it's simple.
+
+---
+
+### Mistakes / Fixes (Updated)
+
+**Problem:** Escape sequence byte detection had a `select()` timeout on all three bytes, causing arrows to timeout and be misdetected as ESC.
+**Previous (incorrect) fix:** Increase the timeout to 200ms or 500ms.
+**What actually worked:** Remove the timeout for continuation bytes — use blocking reads for bytes 2 and 3.
+
+**Problem:** Interactive search view tried to switch between normal mode (`input()`) and raw mode (`getch()`) mid-interaction. This caused the search input to fail silently — users typed search queries but nothing happened.
+**Root cause:** Mixing terminal modes within a single loop creates state confusion. When `getch()` exits and restores terminal settings, then `input()` is called, the buffering and mode switching causes unpredictable behavior.
+**What actually worked:** Separate the concerns cleanly:
+  1. Get user input in **normal mode** first (use `input()`)
+  2. Then execute the search
+  3. Then enter **raw mode** for the interactive navigation loop (use `getch()`)
+  4. Never try to switch modes within the same interaction loop
+
+The separation makes it simple and reliable.
+
+---

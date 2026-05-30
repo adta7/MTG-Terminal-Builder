@@ -48,6 +48,11 @@ from rich.table import Table
 from rich.text import Text
 from rich import box
 
+# Import UI components and views
+from ui import SessionState, MenuItem, ask_choice_interactive
+from search_view import run_card_search_view
+from pinned_view import run_pinned_cards_view
+
 console = Console()
 
 # ─── Constants ────────────────────────────────────────────────────────────────
@@ -1650,6 +1655,19 @@ def run_collection_pipeline():
 # ─── Main Menu ────────────────────────────────────────────────────────────────
 
 def main():
+    # Session state: shared across the app (in-memory, not persisted)
+    session_state = SessionState()
+
+    # Define main menu items
+    main_menu_items = [
+        MenuItem("search", "Search Cards", "Browse and search the card database"),
+        MenuItem("pinned", "Pinned Cards", "View cards pinned this session"),
+        MenuItem("deck", "Deck Manager", "Create and manage decks"),
+        MenuItem("lookup", "Card Lookup", "Look up individual cards"),
+        MenuItem("pipeline", "Collection Enhancer", "Enrich spreadsheets with card data"),
+        MenuItem("quit", "Quit", "Exit the application"),
+    ]
+
     while True:
         console.print()
         console.print(Panel(
@@ -1661,26 +1679,44 @@ def main():
         ))
         console.print()
 
-        idx = ask_choice(
+        choice = ask_choice_interactive(
             "What would you like to do?",
-            ["deck", "lookup", "pipeline", "quit"],
-            [
-                "Deck Manager",
-                "Card Lookup",
-                "Collection Enhancer Pipeline",
-                "Quit",
-            ],
+            main_menu_items,
         )
 
         print()
 
-        if idx == 0:
+        if choice is None:
+            # User cancelled
+            continue
+
+        if choice.key == "search":
+            # Search Cards
+            try:
+                db = get_scryfall_db()
+                run_card_search_view(db, session_state)
+            except Exception as e:
+                print(f"  ✗ Error in search view: {e}")
+                import traceback
+                traceback.print_exc()
+            # Always clear and return to menu
+            print("\n  Returning to menu...\n")
+
+        elif choice.key == "pinned":
+            # Pinned Cards
+            run_pinned_cards_view(session_state)
+            print()
+
+        elif choice.key == "deck":
             run_deck_manager()
-        elif idx == 1:
+
+        elif choice.key == "lookup":
             run_card_lookup()
-        elif idx == 2:
+
+        elif choice.key == "pipeline":
             run_collection_pipeline()
-        elif idx == 3:
+
+        elif choice.key == "quit":
             print("  Bye!\n")
             sys.exit(0)
 
