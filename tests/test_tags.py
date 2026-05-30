@@ -232,11 +232,57 @@ class TestTagMechanical:
         applied = tags.tag_mechanical(card, db)
         assert "Sacrifice_Outlet" in applied
 
+    def test_sacrifice_outlet_not_on_additional_cast_cost(self, db):
+        """Victimize-style: sacrifice as additional cast cost is NOT a repeatable outlet."""
+        card = _make_card(
+            "Victimize",
+            "As an additional cost to cast this spell, sacrifice a creature. "
+            "Return two target creature cards from your graveyard to the battlefield tapped.",
+        )
+        applied = tags.tag_mechanical(card, db)
+        assert "Sacrifice_Outlet" not in applied
+        assert "Reanimation" in applied  # still correctly tagged as reanimation
+
+    def test_sacrifice_outlet_not_on_etb_trigger(self, db):
+        """Disciple of Bolas-style: ETB sacrifice is NOT a repeatable outlet."""
+        card = _make_card(
+            "Disciple of Bolas",
+            "When Disciple of Bolas enters the battlefield, sacrifice another creature. "
+            "You draw X cards and you gain X life, where X is that creature's power.",
+        )
+        applied = tags.tag_mechanical(card, db)
+        assert "Sacrifice_Outlet" not in applied
+
     def test_board_wipe_detected(self, db):
         card = _make_card("Damnation",
                           "Destroy all creatures. They can't be regenerated.")
         applied = tags.tag_mechanical(card, db)
         assert "Board_Wipe" in applied
+
+    def test_graveyard_tutor_detected(self, db):
+        """Buried Alive / Entomb style — search library and put to GY — gets Graveyard_Tutor."""
+        buried_alive = _make_card(
+            "Buried Alive",
+            "Search your library for up to three creature cards, put them into your graveyard, "
+            "then shuffle.",
+        )
+        entomb = _make_card(
+            "Entomb",
+            "Search your library for a card, put that card into your graveyard, then shuffle.",
+        )
+        for card in [buried_alive, entomb]:
+            applied = tags.tag_mechanical(card, db)
+            assert "Graveyard_Tutor" in applied, f"{card.name}: expected Graveyard_Tutor"
+
+    def test_regular_tutor_not_graveyard_tutor(self, db):
+        """Regular tutors (to hand) should NOT get Graveyard_Tutor."""
+        demonic_tutor = _make_card(
+            "Demonic Tutor",
+            "Search your library for a card, put that card into your hand, then shuffle.",
+        )
+        applied = tags.tag_mechanical(demonic_tutor, db)
+        assert "Graveyard_Tutor" not in applied
+        assert "Tutor_Effect" in applied  # still a tutor, just not a GY one
 
     def test_reanimation_detected(self, db):
         card = _make_card("Animate Dead",
@@ -866,11 +912,16 @@ class TestPatternLifeGainThatMuch:
     """'you gain that much life' fires Life_Gain (Extort, drain spells)."""
 
     def test_extort_reminder_text(self, db):
+        """Extort reminder text is stripped — Life_Gain must NOT fire from it.
+        The card correctly gets the Extort keyword tag instead.
+        """
         card = _make_card("Crypt Ghast",
                           "Whenever you tap a Swamp for mana, add an additional {B}. "
                           "Extort (Whenever you cast a spell, you may pay {W/B}. "
                           "If you do, each opponent loses 1 life and you gain that much life.)")
-        assert "Life_Gain" in tags.tag_mechanical(card, db)
+        result = tags.tag_mechanical(card, db)
+        assert "Extort" in result
+        assert "Life_Gain" not in result
 
     def test_plain_life_gain_not_affected(self, db):
         """Existing 'you gain N life' pattern should still fire."""

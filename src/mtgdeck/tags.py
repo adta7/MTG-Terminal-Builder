@@ -75,6 +75,7 @@ TAGS: list[tuple[str, str, str]] = [
     ("Looting_Effect",    "mechanical", "Draws cards then discards cards (or vice versa) — cycles hand while filling the graveyard."),
     ("Combat_Trigger",    "mechanical", "Has an ability that triggers when it or another creature attacks or deals combat damage."),
     ("Search_For_Land",   "mechanical", "Searches the library for a land card — provides ramp or mana fixing."),
+    ("Graveyard_Tutor",   "mechanical", "Searches the library and puts cards directly into the graveyard — Entomb, Buried Alive, Unmarked Grave."),
     ("Undying_Persist",   "mechanical", "Returns from graveyard with a +1/+1 or -1/-1 counter — inherently recurs, hard to permanently answer."),
     ("Extort",            "mechanical", "Drains life from all opponents whenever you cast a spell — scales with spell count in multiplayer."),
     ("Devotion_Effect",   "mechanical", "Scales with devotion — counts colored mana symbols among permanents you control."),
@@ -85,6 +86,7 @@ TAGS: list[tuple[str, str, str]] = [
 
     ("Mana_Acceleration", "functional", "Produces more mana than a normal land drop, helping cast spells faster."),
     ("Mana_Engine",       "functional", "Provides repeatable or scaling mana — doubles, scales with board, etc."),
+    ("Card_Draw",         "functional", "Literally draws cards — increases cards in hand or cards seen. Not tutors."),
     ("Card_Advantage",    "functional", "Generates card advantage — draws cards, tutors, replaces itself."),
     ("Removal",           "functional", "Eliminates threats — spot removal or board wipes."),
     ("Protection",        "functional", "Shields key cards or the board state from removal."),
@@ -133,13 +135,41 @@ TAGS: list[tuple[str, str, str]] = [
     ("Comeback_Card",     "emotional", "Helps stabilize or take back momentum when behind."),
     ("Grand_Finisher",    "emotional", "Ends the game outright when it resolves — no delay."),
     ("Momentum_Spike",    "emotional", "Creates a breakout turn that pulls the deck far ahead."),
+    ("Efficient_Staple",  "emotional", "Low-cost, high-efficiency card that consistently earns its slot."),
+    ("Cheap_Enabler",     "emotional", "Low-cost enabler that keeps the engine running at minimal tempo cost."),
 ]
+
+
+# ─── Reminder Text Stripping ──────────────────────────────────────────────────
+#
+# Oracle text sometimes embeds keyword reminder text in parentheses, e.g.:
+#   "Undying (When this creature dies, if it had no +1/+1 counters on it...)"
+#   "Extort (Whenever you cast a spell, you may pay...)"
+#   Treasure token reminder: "(It's an artifact with '{T}, Sacrifice this artifact:
+#     Add one mana of any color.')"
+#
+# We strip these parenthetical blocks before pattern matching to avoid false
+# positives — especially Mana_Production firing on Treasure token reminder text.
+# The core ability text (before the paren) still matches the keyword patterns.
+
+def _strip_reminder_text(text: str) -> str:
+    """
+    Remove parenthetical reminder text from oracle text before pattern matching.
+
+    Parenthetical reminders are informational only and should not influence
+    mechanical tagging. Examples:
+      "Flying (This creature can block creatures with flying.)" → "Flying "
+      "(It's an artifact with '{T}, Sacrifice this artifact: Add one mana of any color.')" → " "
+
+    Handles nested parens at depth 1 (MTG oracle text never goes deeper).
+    """
+    return re.sub(r'\([^)]*\)', '', text)
 
 
 # ─── Oracle Text Auto-Tag Patterns (mechanical layer only) ────────────────────
 #
 # Each entry: (tag_name, regex_pattern, confidence)
-# Patterns are applied to card.oracle_text (lowercased).
+# Patterns are applied to REMINDER-TEXT-STRIPPED lowercased oracle text.
 # Keep these precise to avoid false positives.
 
 _MECHANICAL_PATTERNS: list[tuple[str, str, float]] = [
@@ -159,8 +189,15 @@ _MECHANICAL_PATTERNS: list[tuple[str, str, float]] = [
     # "you gain that much life" — Extort reminder text, Consuming Aberration variants
     ("Life_Gain",         r"you gain that much life", 0.85),
 
-    # Sacrifice outlets (YOU sacrifice as a cost or effect)
-    ("Sacrifice_Outlet",  r"sacrifice (?:a|another|any number of) (?:creature|permanent)", 1.0),
+    # Sacrifice outlets — card has an activated ability whose cost includes sacrificing.
+    # Requires the colon that separates cost from effect in activated abilities:
+    #   "Sacrifice a creature: Scry 1"        → outlet ✓
+    #   "Sacrifice a creature: Add {C}{C}."   → outlet ✓ (also caught by second pattern)
+    # This intentionally excludes:
+    #   "As an additional cost to cast this spell, sacrifice a creature." (Victimize)
+    #   "When [name] enters, sacrifice another creature." (Disciple of Bolas)
+    # Those are casting costs / ETB triggers, not repeatable outlets.
+    ("Sacrifice_Outlet",  r"sacrifice (?:a|another|any number of) (?:\w+ )*(?:creature|permanent)\s*:", 1.0),
     ("Sacrifice_Outlet",  r"sacrifice .{1,20}: add", 1.0),
 
     # Forced sacrifice (OPPONENTS are forced to sacrifice)
@@ -178,6 +215,8 @@ _MECHANICAL_PATTERNS: list[tuple[str, str, float]] = [
     # Artifact tokens: Treasure, Food, Blood, Clue, Gold, Ichor, Map
     # "create a Treasure token" — Pitiless Plunderer, Deadly Dispute, etc.
     ("Token_Generation",           r"create (?:a |an |two |three )?(?:treasure|food|blood|clue|gold|ichor|map) token", 0.9),
+    # "investigate" keyword — always creates a Clue token (reminder text is stripped)
+    ("Token_Generation",           r"\binvestigate\b", 0.85),
 
     # Repeatable token generation — creates tokens on a recurring trigger
     # "at the beginning of your upkeep/turn/end step" or "each player's upkeep"
@@ -216,6 +255,9 @@ _MECHANICAL_PATTERNS: list[tuple[str, str, float]] = [
     ("Mana_Multiplier",   r"add an additional \{[wubrgcx]\}", 0.9),
     # "Whenever you tap a land for mana, add one mana of any type" — general tap doublers
     ("Mana_Multiplier",   r"whenever you tap .{1,30}for mana, add", 0.9),
+    # "its controller adds one mana of that color" — Gauntlet of Power-style ability-text doubling
+    # (the parenthetical "This effect doubles the mana..." is stripped as reminder text)
+    ("Mana_Multiplier",   r"adds one mana of that color", 0.85),
 
     # Mana production (non-land permanents)
     ("Mana_Production",   r"add \{[wubrgc]\}", 0.9),
@@ -348,6 +390,11 @@ _MECHANICAL_PATTERNS: list[tuple[str, str, float]] = [
     # "search your library for a basic land card" / "a land card" / "a Swamp"
     ("Search_For_Land",   r"search your library for (?:a |an |up to (?:\w+ )?)?(?:basic )?(?:land|swamp|forest|island|plains|mountain)", 0.95),
 
+    # Graveyard tutors — search library and PUT cards directly into the graveyard.
+    # Covers: Entomb, Buried Alive, Unmarked Grave, Jarad's Orders (partial).
+    # Deliberately distinct from Search_For_Land / Tutor_Effect (which goes to hand).
+    ("Graveyard_Tutor",   r"search your library for .{0,60}?put (?:it|them|that card) into your graveyard", 0.95),
+
     # Undying / Persist — returns after dying with a counter change
     ("Undying_Persist",   r"\bundying\b", 1.0),
     ("Undying_Persist",   r"\bpersist\b", 1.0),
@@ -386,11 +433,13 @@ FUNCTIONAL_RULES: list[tuple[frozenset, str, float]] = [
 
     # ── Mana_Acceleration ────────────────────────────────────────────────────
     # Any card that produces more mana than it costs (rocks, ramp, doublers, reducers)
+    # NOTE: Life_Payment alone does NOT imply mana acceleration. Phyrexian Arena pays
+    # life for cards, not mana. K'rrik pays life instead of mana — but K'rrik has both
+    # Life_Payment AND Mana_Production, which is caught by the Mana_Engine rules below.
     (frozenset({"Mana_Production"}),                                "Mana_Acceleration", 0.75),
     (frozenset({"Mana_Multiplier"}),                                "Mana_Acceleration", 0.90),
     (frozenset({"Search_For_Land"}),                                "Mana_Acceleration", 0.80),
     (frozenset({"Cost_Reduction"}),                                 "Mana_Acceleration", 0.65),
-    (frozenset({"Life_Payment"}),                                   "Mana_Acceleration", 0.60),
 
     # ── Mana_Engine ──────────────────────────────────────────────────────────
     # Repeating, scaling, or amplifying mana production — more than basic ramp
@@ -401,8 +450,21 @@ FUNCTIONAL_RULES: list[tuple[frozenset, str, float]] = [
     (frozenset({"Mana_Production", "Sacrifice_Outlet"}),            "Mana_Engine",       0.85),
     (frozenset({"Mana_Production", "Death_Trigger"}),               "Mana_Engine",       0.80),
 
+    # ── Card_Draw ────────────────────────────────────────────────────────────
+    # Literally draws cards — narrows Card_Advantage to genuine draw effects only.
+    # Tutors do NOT get Card_Draw — they get Setup instead.
+    # This is the tag the "draw" profile category uses.
+    (frozenset({"Draw_Effect"}),                                    "Card_Draw",         0.85),
+    (frozenset({"Draw_Effect", "Death_Trigger"}),                   "Card_Draw",         0.90),
+    (frozenset({"Draw_Effect", "Upkeep_Trigger"}),                  "Card_Draw",         0.90),
+    (frozenset({"Draw_Effect", "ETB_Trigger"}),                     "Card_Draw",         0.85),
+    (frozenset({"Draw_Effect", "Combat_Trigger"}),                  "Card_Draw",         0.85),
+    (frozenset({"Draw_Effect", "Forced_Sacrifice"}),                "Card_Draw",         0.85),
+
     # ── Card_Advantage ───────────────────────────────────────────────────────
-    # Generates card advantage — draws, tutors, or replaces itself
+    # Generates card advantage — draws, tutors, or replaces itself.
+    # Broader than Card_Draw: includes tutors, looting, and repeatable draw.
+    # Does NOT map to the "draw" profile category (use Card_Draw for that).
     (frozenset({"Draw_Effect"}),                                    "Card_Advantage",    0.80),
     (frozenset({"Tutor_Effect"}),                                   "Card_Advantage",    0.90),
     (frozenset({"Looting_Effect"}),                                 "Card_Advantage",    0.65),
@@ -538,6 +600,7 @@ FUNCTIONAL_RULES: list[tuple[frozenset, str, float]] = [
     # ── Setup ────────────────────────────────────────────────────────────────
     # Sets up future turns — tutors, self-mill, looting
     (frozenset({"Tutor_Effect"}),                                   "Setup",             0.90),
+    (frozenset({"Graveyard_Tutor"}),                                "Setup",             0.90),
     (frozenset({"Self_Mill"}),                                      "Setup",             0.75),
     (frozenset({"Looting_Effect"}),                                 "Setup",             0.70),
     (frozenset({"Search_For_Land"}),                                "Setup",             0.65),
@@ -706,11 +769,23 @@ def tag_mechanical(card: Card, db) -> list[str]:
         applied = tag_mechanical(card, db)
         # → ['Draw_Effect', 'Death_Trigger', ...]
     """
-    oracle = (card.oracle_text or "").lower()
+    # Strip parenthetical reminder text before matching.
+    # This prevents false positives like Treasure token reminder text "(Add one mana
+    # of any color)" triggering Mana_Production on cards that create Treasure tokens.
+    oracle = _strip_reminder_text((card.oracle_text or "").lower())
+    is_land = "Land" in (card.type_line or "")
     applied = []
 
     for tag_name, pattern, confidence in _MECHANICAL_PATTERNS:
         if re.search(pattern, oracle):
+            # Lands produce mana by definition — "add {B}" in a land's oracle text
+            # is its basic function, not a special ability. Only tag Mana_Production
+            # for lands that produce *extra* or *scaling* mana (Crypt of Agadeem,
+            # Cabal Coffers). Plain utility lands (Bojuka Bog, High Market, etc.)
+            # should not be tagged — they tap for one mana like any basic.
+            if tag_name == "Mana_Production" and is_land:
+                if not re.search(r"for each|for every|twice|double", oracle):
+                    continue
             success = db.tag_card(card.name, tag_name, confidence, source="regex")
             if success:
                 applied.append(tag_name)

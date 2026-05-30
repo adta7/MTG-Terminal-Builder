@@ -489,6 +489,28 @@ class Database:
         self.conn.commit()
         return True
 
+    def delete_auto_tags(self, card_name: str) -> int:
+        """
+        Delete all automatically derived tags for a card.
+
+        Removes tags with source 'regex' (from tag_mechanical) and 'rule_engine'
+        (from tag_functional_from_rules / tag_archetype_from_rules). Manual tags
+        (source='manual') are never touched.
+
+        Use this before re-running the tagging pipeline to avoid accumulating
+        stale tags from old rule versions.
+
+        Returns:
+            Number of tags deleted.
+        """
+        cur = self.conn.cursor()
+        cur.execute(
+            "DELETE FROM card_tags WHERE card_id = ? AND source IN ('regex', 'rule_engine')",
+            (card_name,),
+        )
+        self.conn.commit()
+        return cur.rowcount
+
     def get_card_tags(self, card_name: str, layer: Optional[str] = None) -> List[dict]:
         """
         Get all tags for a card, optionally filtered by layer.

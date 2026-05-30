@@ -43,10 +43,17 @@ from .database import Database
 
 CATEGORY_FUNCTIONAL_TAGS: dict[str, frozenset] = {
     "ramp":           frozenset({"Mana_Acceleration", "Mana_Engine"}),
-    "draw":           frozenset({"Card_Advantage", "Setup"}),
+    # "draw" uses Card_Draw only — NOT Card_Advantage or Setup.
+    # Card_Advantage includes tutors (Vampiric Tutor, Demonic Tutor) which are card
+    # selection / setup tools, not draw. Tutors are card-disadvantage in the hand,
+    # costing a card to find another. Only literal draw effects count toward draw targets.
+    "draw":           frozenset({"Card_Draw"}),
     "removal":        frozenset({"Removal", "Interaction"}),
     "reanimation":    frozenset({"Recursion"}),
-    "graveyard_fill": frozenset({"Fuel"}),
+    # "graveyard_fill" uses NO functional tags — Fuel is too broad.
+    # Fuel includes token generators (Repeatable_Token_Generation → Fuel), which are
+    # sacrifice fuel but do NOT fill the graveyard. Self_Mill and Looting_Effect
+    # (via CATEGORY_MECHANICAL_TAGS) cover the real graveyard-filling effects.
     "protection":     frozenset({"Protection"}),
     # "wincons" uses only Finisher — Payoff is too broad (Blood Artist payoffs ≠ win conditions)
     "wincons":        frozenset({"Finisher"}),
@@ -55,26 +62,58 @@ CATEGORY_FUNCTIONAL_TAGS: dict[str, frozenset] = {
 
 CATEGORY_MECHANICAL_TAGS: dict[str, frozenset] = {
     "board_wipes":    frozenset({"Board_Wipe"}),
-    "graveyard_fill": frozenset({"Self_Mill"}),
+    # graveyard_fill: cards that put cards IN the graveyard.
+    # Self_Mill = explicit mill effects (Stitcher's Supplier, Perpetual Timepiece).
+    # Looting_Effect = draw-then-discard or discard-then-draw (fills GY by discarding).
+    # Graveyard_Tutor = search library and put directly into GY (Entomb, Buried Alive).
+    "graveyard_fill": frozenset({"Self_Mill", "Looting_Effect", "Graveyard_Tutor"}),
     # Sacrifice_Outlet is a precise mechanical tag — only cards that explicitly let you
     # sacrifice permanents as a cost or activated ability. Much more accurate than Engine.
     "sac_outlets":    frozenset({"Sacrifice_Outlet"}),
 }
 
+# ─── Emotional/Identity Category → Tag Mappings ───────────────────────────────
+#
+# Maps strategic identity categories to Layer 5 (emotional) tag names.
+# These capture the deck's personality and play pattern — cards that matter
+# for identity, pressure, conversion engines, and apex threats.
+#
+# These categories are MANUALLY maintained — the rule engine cannot reliably
+# infer them from oracle text. Use `mtgdeck retag-deck` after adding manual
+# emotional tags to a card.
+
+CATEGORY_EMOTIONAL_TAGS: dict[str, frozenset] = {
+    "pressure_pieces":  frozenset({"Pressure_Piece", "Table_Threat"}),
+    "conversion_cards": frozenset({"Conversion_Piece"}),
+    "engine_core":      frozenset({"Engine_Core"}),
+    "recursive_fuel":   frozenset({"Renewable_Fuel"}),
+    "apex_threats":     frozenset({"Apex_Threat"}),
+    "identity_cards":   frozenset({"Identity_Card"}),
+    "mana_payoffs":     frozenset({"Grand_Finisher", "Momentum_Spike"}),
+}
+
 # Human-readable display names for CLI output.
 CATEGORY_DISPLAY_NAMES: dict[str, str] = {
-    "lands":          "Lands",
-    "ramp":           "Ramp",
-    "draw":           "Draw",
-    "removal":        "Removal",
-    "board_wipes":    "Board Wipes",
-    "reanimation":    "Reanimation",
-    "sac_outlets":    "Sac Outlets",
-    "protection":     "Protection",
-    "graveyard_fill": "Graveyard Fill",
-    "wincons":        "Win Cons",
-    "avg_mana_value": "Avg MV",
-    "token_makers":   "Token Makers",
+    "lands":            "Lands",
+    "ramp":             "Ramp",
+    "draw":             "Draw",
+    "removal":          "Removal",
+    "board_wipes":      "Board Wipes",
+    "reanimation":      "Reanimation",
+    "sac_outlets":      "Sac Outlets",
+    "protection":       "Protection",
+    "graveyard_fill":   "Graveyard Fill",
+    "wincons":          "Win Cons",
+    "avg_mana_value":   "Avg MV",
+    "token_makers":     "Token Makers",
+    # Emotional / strategic identity categories
+    "pressure_pieces":  "Pressure Pieces",
+    "conversion_cards": "Conversion Cards",
+    "engine_core":      "Engine Core",
+    "recursive_fuel":   "Recursive Fuel",
+    "apex_threats":     "Apex Threats",
+    "identity_cards":   "Identity Cards",
+    "mana_payoffs":     "Mana Payoffs",
 }
 
 
@@ -160,10 +199,11 @@ def count_roles_in_deck(deck: Deck, db: Database) -> dict[str, int]:
     """
     Count how many cards in the deck fill each profile category.
 
-    For each card:
-      1. Fetch its functional tags (Layer 3) and mechanical tags (Layer 2)
-      2. Determine which profile categories it contributes to
-      3. Add card_entry.count toward each contributed category
+    Checks three tag layers:
+      - Functional (Layer 3): ramp, draw, removal, reanimation, protection, wincons
+      - Mechanical (Layer 2): board_wipes, graveyard_fill, sac_outlets
+      - Emotional (Layer 5): pressure_pieces, conversion_cards, engine_core,
+                             recursive_fuel, apex_threats, identity_cards, mana_payoffs
 
     A card contributes at most 1 count per category, even if multiple of
     its tags map to the same category. Cards with no tags are silently skipped.
@@ -182,6 +222,10 @@ def count_roles_in_deck(deck: Deck, db: Database) -> dict[str, int]:
             t["name"]
             for t in db.get_card_tags(card_entry.name, layer="mechanical")
         }
+        emotional_tags = {
+            t["name"]
+            for t in db.get_card_tags(card_entry.name, layer="emotional")
+        }
 
         # Collect unique categories this card contributes to.
         # Using a set ensures each category is counted at most once per card,
@@ -194,6 +238,10 @@ def count_roles_in_deck(deck: Deck, db: Database) -> dict[str, int]:
 
         for category, tag_set in CATEGORY_MECHANICAL_TAGS.items():
             if mech_tags & tag_set:
+                contributed.add(category)
+
+        for category, tag_set in CATEGORY_EMOTIONAL_TAGS.items():
+            if emotional_tags & tag_set:
                 contributed.add(category)
 
         for category in contributed:
