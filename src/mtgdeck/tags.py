@@ -26,7 +26,7 @@ import re
 from typing import Optional
 
 from .models import Card
-from .oracle_preprocessor import preprocess_oracle
+from .oracle_preprocessor import preprocess_oracle, search_text as _preprocess_search
 
 
 # ─── Built-in Tag Registry ─────────────────────────────────────────────────────
@@ -846,28 +846,21 @@ def get_synergies(card_name: str, db, min_strength: float = 0.0) -> list[dict]:
     return db.get_synergies(card_name, min_strength)
 
 
-def _ability_kind_for_span(preprocessed, pattern: str) -> str:
-    """Return ability_kind by locating the pattern in main_text and checking segment spans.
+def _ability_kind_for_span(segments, oracle_start: int, oracle_end: int) -> str:
+    """Return ability_kind of the segment whose span contains oracle_start.
 
-    Uses search_text("main") so the match spans align with segment.start/end offsets,
-    avoiding false matches when the same phrase appears in multiple ability segments.
+    Segments and oracle_start must be in the same coordinate space (main_text).
     """
-    from .oracle_preprocessor import search_text as preprocess_search
-    spans = preprocess_search(preprocessed, pattern, search_in="main")
-    if not spans:
-        return "other"
-    match_start, _ = spans[0]
-    for seg in preprocessed.segments:
-        if seg.start <= match_start < seg.end:
+    for seg in segments:
+        if seg.start <= oracle_start < seg.end:
             return seg.ability_kind
     return "other"
 
 
-def _text_role_for_span(preprocessed, pattern: str, ability_kind: str) -> str:
-    """Classify the syntactic role of the matched text within its ability.
+def _text_role_for_span(segments, oracle_start: int, oracle_end: int, ability_kind: str) -> str:
+    """Classify the syntactic role of the match span within its ability.
 
-    Uses span-based segment lookup to avoid ambiguity when a phrase appears
-    in multiple abilities.
+    Segments and oracle_start must be in the same coordinate space (main_text).
 
     Roles:
       cost        — the payment portion of an activated ability (before ':')
@@ -882,16 +875,10 @@ def _text_role_for_span(preprocessed, pattern: str, ability_kind: str) -> str:
     if ability_kind == "static":
         return "static"
 
-    from .oracle_preprocessor import search_text as preprocess_search
-    spans = preprocess_search(preprocessed, pattern, search_in="main")
-    if not spans:
-        return "unknown"
-
-    match_start, _ = spans[0]
-    for seg in preprocessed.segments:
-        if seg.start <= match_start < seg.end:
+    for seg in segments:
+        if seg.start <= oracle_start < seg.end:
             seg_lower = seg.text.lower()
-            rel_pos = match_start - seg.start  # match position within this segment
+            rel_pos = oracle_start - seg.start  # position of match within this segment
 
             if ability_kind == "activated":
                 colon_pos = seg_lower.find(":")
@@ -929,51 +916,52 @@ def tag_mechanical(card: Card, db) -> list[str]:
         applied = tag_mechanical(card, db)
         # → ['Draw_Effect', 'Death_Trigger', ...]
     """
-    # Strip parenthetical reminder text before matching.
-    # This prevents false positives like Treasure token reminder text "(Add one mana
-    # of any color)" triggering Mana_Production on cards that create Treasure tokens.
+    # Use search_text("main") for all matching. This gives spans into preprocessed.main_text
+    # (reminder text stripped, original case), which is the same coordinate space as
+    # segment.start/end. A single span from the match drives evidence, ability_kind,
+    # and text_role — no re-searching inside the helpers.
     oracle_raw = card.oracle_text or ""
-    oracle_original = _strip_reminder_text(oracle_raw)      # original case, no reminder text
-    oracle = oracle_original.lower()                         # lowercase for pattern matching
     is_land = "Land" in (card.type_line or "")
     applied = []
 
     preprocessed = preprocess_oracle(card.name, oracle_raw)
 
     for tag_name, pattern, confidence, rule_id in _MECHANICAL_PATTERNS:
-        match = re.search(pattern, oracle)
-        if match:
-            # Lands produce mana by definition — "add {B}" in a land's oracle text
-            # is its basic function, not a special ability. Only tag Mana_Production
-            # for lands that produce *extra* or *scaling* mana (Crypt of Agadeem,
-            # Cabal Coffers). Plain utility lands (Bojuka Bog, High Market, etc.)
-            # should not be tagged — they tap for one mana like any basic.
-            if tag_name == "Mana_Production" and is_land:
-                if not re.search(r"for each|for every|twice|double", oracle):
-                    continue
+        spans = _preprocess_search(preprocessed, pattern, search_in="main")
+        if not spans:
+            continue
 
-            oracle_start = match.start()
-            oracle_end = match.end()
-            # Recover original-case evidence text (lowercasing preserves offsets for ASCII)
-            evidence_text = oracle_original[oracle_start:oracle_end]
+        oracle_start, oracle_end = spans[0]
 
-            ability_kind = _ability_kind_for_span(preprocessed, pattern)
-            text_role = _text_role_for_span(preprocessed, pattern, ability_kind)
+        # Lands produce mana by definition — "add {B}" in a land's oracle text
+        # is its basic function, not a special ability. Only tag Mana_Production
+        # for lands that produce *extra* or *scaling* mana (Crypt of Agadeem,
+        # Cabal Coffers). Plain utility lands (Bojuka Bog, High Market, etc.)
+        # should not be tagged — they tap for one mana like any basic.
+        if tag_name == "Mana_Production" and is_land:
+            if not _preprocess_search(preprocessed, r"for each|for every|twice|double", search_in="main"):
+                continue
 
-            success = db.emit_tag_evidence(
-                card_name=card.name,
-                tag_name=tag_name,
-                rule_id=rule_id,
-                evidence_text=evidence_text,
-                oracle_start=oracle_start,
-                oracle_end=oracle_end,
-                ability_kind=ability_kind,
-                text_role=text_role,
-                confidence=confidence,
-                source="regex",
-            )
-            if success:
-                applied.append(tag_name)
+        # evidence_text from main_text preserves original case
+        evidence_text = preprocessed.main_text[oracle_start:oracle_end]
+
+        ability_kind = _ability_kind_for_span(preprocessed.segments, oracle_start, oracle_end)
+        text_role = _text_role_for_span(preprocessed.segments, oracle_start, oracle_end, ability_kind)
+
+        success = db.emit_tag_evidence(
+            card_name=card.name,
+            tag_name=tag_name,
+            rule_id=rule_id,
+            evidence_text=evidence_text,
+            oracle_start=oracle_start,
+            oracle_end=oracle_end,
+            ability_kind=ability_kind,
+            text_role=text_role,
+            confidence=confidence,
+            source="regex",
+        )
+        if success:
+            applied.append(tag_name)
 
     # Deduplicate (same tag may match multiple patterns)
     return list(dict.fromkeys(applied))

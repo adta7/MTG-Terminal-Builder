@@ -347,3 +347,47 @@ class TestPatternIntegrity:
             f"Expected ≥90 patterns, got {len(_MECHANICAL_PATTERNS)}. "
             "Check that no patterns were accidentally removed."
         )
+
+    def test_span_maps_to_correct_segment_when_phrase_appears_twice(self):
+        """When the same phrase appears in two segments, evidence maps to the right segment.
+
+        This is the correctness test for span-based vs text-search segment lookup.
+        A card with "Sacrifice a creature:" in an activated ability (line 1) and
+        also in a triggered ability (line 2) — the Sacrifice_Outlet pattern should
+        map to the first occurrence, which is the activated ability.
+        """
+        db = Database(":memory:")
+        db.init_db()
+        tags.seed_tags(db)
+
+        # Line 1: activated ability — "Sacrifice a creature: Add {C}{C}."
+        # Line 2: triggered ability that also includes the phrase
+        # The Sacrifice_Outlet pattern fires on line 1 first.
+        card = Card(
+            name="Multi-Segment Test",
+            mana_cost="{3}",
+            cmc=3,
+            type_line="Artifact",
+            oracle_text=(
+                "Sacrifice a creature: Add {C}{C}.\n"
+                "Whenever you sacrifice a creature, draw a card."
+            ),
+        )
+        db.insert_card(card)
+        tags.tag_mechanical(card, db)
+
+        evidence = db.get_tag_evidence("Multi-Segment Test", "Sacrifice_Outlet")
+        assert len(evidence) > 0, "Multi-Segment Test should have Sacrifice_Outlet evidence"
+
+        # The first match is in the activated ability (line 1)
+        assert evidence[0]["ability_kind"] == "activated", (
+            f"First Sacrifice_Outlet match should be in 'activated' segment "
+            f"(line 1: 'Sacrifice a creature: Add {{C}}{{C}}.'), "
+            f"got ability_kind={evidence[0]['ability_kind']!r}"
+        )
+        assert evidence[0]["text_role"] == "cost", (
+            f"Sacrifice in activated ability should have text_role='cost', "
+            f"got {evidence[0]['text_role']!r}"
+        )
+
+        db.close()
