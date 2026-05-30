@@ -5,6 +5,17 @@ Format: [Version] — Date — Description
 
 ---
 
+## [2.8.0] — 2026-05-29
+
+### Added
+- `src/mtgdeck/scoring.py` — Phase 4: deterministic card scoring; `ScoringContext`, `ScoreBreakdown`, `score_card()`, five scoring components: `role_match` (0-40), `profile_gap` (0-30), `archetype_fit` (0-15), `identity_score` (0-10), `mv_modifier` (-5 to +5); `IDENTITY_SCORES` weight table; `MV_SENSITIVE_ROLES` / `MV_TOLERANT_ROLES` sets; `_categories_filled()` shared utility
+- `src/mtgdeck/recommender.py` — Phase 4: card suggestions and cut candidates; `Suggestion`, `CutCandidate` dataclasses; `build_context()` (pre-computes deck archetype tags and role gaps); `suggest()` (top-N candidates for a role, tagged cards only); `cuts()` (lowest keep-score cards, commander + land excluded by default); `_find_candidates_for_role()`; `_score_as_cut()` (confidence, gap alignment, identity protection, archetype overlap, multi-function bonus)
+- `tests/test_scoring.py` — 67 unit tests covering all scoring components; pure tests, no database required
+- `tests/test_recommender.py` — 38 integration tests covering `build_context`, `_find_candidates_for_role`, `suggest`, `cuts`, `_score_as_cut`; 305 total tests
+- `src/mtgdeck/__main__.py` — `suggest` CLI command (`python -m mtgdeck suggest <deck> --role <role> [--profile <name>] [--top <n>]`); `cuts` CLI command (`python -m mtgdeck cuts <deck> [--count <n>] [--profile <name>] [--include-lands]`); `run_suggest()` and `run_cuts()` runner functions
+
+---
+
 ## [2.7.0] — 2026-05-27
 
 ### Added
