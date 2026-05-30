@@ -130,18 +130,18 @@ class Database:
         #   0.4 = contextual (depends on deck)
         #   0.1 = speculative
         #
-        # NOTE: card_id is intentionally NOT a FK to cards(name).
+        # NOTE: card_name is intentionally NOT a FK to cards(name).
         # Tags are metadata about a card by name and should work even
         # for cards not yet indexed from Scryfall. tag_id IS enforced
         # so every tag must exist in the registry before use.
         cur.execute("""
             CREATE TABLE IF NOT EXISTS card_tags (
-                card_id TEXT NOT NULL,
+                card_name TEXT NOT NULL,
                 tag_id INTEGER NOT NULL,
                 confidence REAL DEFAULT 1.0,
                 source TEXT DEFAULT 'manual',
                 note TEXT,
-                PRIMARY KEY (card_id, tag_id),
+                PRIMARY KEY (card_name, tag_id),
                 FOREIGN KEY(tag_id) REFERENCES tags(id)
             )
         """)
@@ -482,7 +482,7 @@ class Database:
         cur = self.conn.cursor()
         cur.execute(
             """
-            INSERT OR REPLACE INTO card_tags (card_id, tag_id, confidence, source, note)
+            INSERT OR REPLACE INTO card_tags (card_name, tag_id, confidence, source, note)
             VALUES (?, ?, ?, ?, ?)
             """,
             (card_name, tag_id, confidence, source, note or ""),
@@ -516,9 +516,9 @@ class Database:
         # against the stored confidence; if the incoming is higher, update all fields.
         cur.execute(
             """
-            INSERT INTO card_tags (card_id, tag_id, confidence, source, note)
+            INSERT INTO card_tags (card_name, tag_id, confidence, source, note)
             VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(card_id, tag_id) DO UPDATE SET
+            ON CONFLICT(card_name, tag_id) DO UPDATE SET
                 confidence = CASE
                     WHEN excluded.confidence > card_tags.confidence
                     THEN excluded.confidence
@@ -556,7 +556,7 @@ class Database:
         """
         cur = self.conn.cursor()
         cur.execute(
-            "DELETE FROM card_tags WHERE card_id = ? AND source IN ('regex', 'rule_engine')",
+            "DELETE FROM card_tags WHERE card_name = ? AND source IN ('regex', 'rule_engine')",
             (card_name,),
         )
         self.conn.commit()
@@ -576,7 +576,7 @@ class Database:
                 SELECT t.name, t.layer, ct.confidence, ct.source, ct.note
                 FROM card_tags ct
                 JOIN tags t ON ct.tag_id = t.id
-                WHERE LOWER(ct.card_id) = LOWER(?)
+                WHERE LOWER(ct.card_name) = LOWER(?)
                   AND LOWER(t.layer) = LOWER(?)
                 ORDER BY ct.confidence DESC
                 """,
@@ -588,7 +588,7 @@ class Database:
                 SELECT t.name, t.layer, ct.confidence, ct.source, ct.note
                 FROM card_tags ct
                 JOIN tags t ON ct.tag_id = t.id
-                WHERE LOWER(ct.card_id) = LOWER(?)
+                WHERE LOWER(ct.card_name) = LOWER(?)
                 ORDER BY t.layer, ct.confidence DESC
                 """,
                 (card_name,),
@@ -638,7 +638,7 @@ class Database:
         cur = self.conn.cursor()
         cur.execute(
             """
-            SELECT ct.card_id, ct.confidence, ct.source, ct.note
+            SELECT ct.card_name, ct.confidence, ct.source, ct.note
             FROM card_tags ct
             JOIN tags t ON ct.tag_id = t.id
             WHERE LOWER(t.name) = LOWER(?)
@@ -649,7 +649,7 @@ class Database:
         )
         return [
             {
-                "card_name": row["card_id"],
+                "card_name": row["card_name"],
                 "confidence": row["confidence"],
                 "source": row["source"],
                 "note": row["note"],
@@ -683,7 +683,7 @@ class Database:
                 SELECT t.name, COUNT(*) as count
                 FROM card_tags ct
                 JOIN tags t ON ct.tag_id = t.id
-                WHERE LOWER(ct.card_id) IN ({placeholders})
+                WHERE LOWER(ct.card_name) IN ({placeholders})
                   AND LOWER(t.layer) = LOWER(?)
                 GROUP BY t.name
                 ORDER BY count DESC
@@ -696,7 +696,7 @@ class Database:
                 SELECT t.name, COUNT(*) as count
                 FROM card_tags ct
                 JOIN tags t ON ct.tag_id = t.id
-                WHERE LOWER(ct.card_id) IN ({placeholders})
+                WHERE LOWER(ct.card_name) IN ({placeholders})
                 GROUP BY t.name
                 ORDER BY t.layer, count DESC
                 """,

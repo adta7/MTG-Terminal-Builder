@@ -20,18 +20,16 @@ from fixtures.sample_cards import SAMPLE_CARDS, load_sample_cards
 
 
 # Expected mechanical tags for anchor cards in SAMPLE_CARDS.
-#
-# NOTE: Ghoulcaller Gisa and Bolas's Citadel use simplified oracle text in the fixture
-# (not the real Scryfall oracle text). Their expectations below reflect the fixture
-# text, not the real card. Fix fixture oracle texts before treating these as gold truth.
+# All oracle texts are real Scryfall text as of the last fixture update.
 ANCHOR_EXPECTATIONS = {
-    "Ashnod's Altar":          ["Sacrifice_Outlet", "Mana_Production"],
-    "Blood Artist":            ["Death_Trigger", "Life_Drain"],
-    "Grave Pact":              ["Death_Trigger", "Forced_Sacrifice"],
-    "Animate Dead":            ["Reanimation"],
-    "Ghoulcaller Gisa":        ["Token_Generation"],          # fixture has simplified oracle
-    "Bolas's Citadel":         ["Life_Gain"],                 # fixture has simplified oracle
-    "Phyrexian Arena":         ["Draw_Effect"],
+    "Ashnod's Altar":            ["Sacrifice_Outlet", "Mana_Production"],
+    "Blood Artist":              ["Death_Trigger", "Life_Drain"],
+    "Grave Pact":                ["Death_Trigger", "Forced_Sacrifice"],
+    "Animate Dead":              ["Reanimation"],
+    "Living Death":              ["Mass_Reanimate"],
+    "Ghoulcaller Gisa":          ["Sacrifice_Outlet", "Token_Generation"],
+    "Bolas's Citadel":           ["Life_Drain"],
+    "Phyrexian Arena":           ["Draw_Effect"],
     "Sheoldred, Whispering One": ["Reanimation", "Forced_Sacrifice"],
 }
 
@@ -58,23 +56,23 @@ class TestEveryTagHasEvidence:
         """Every card_tags row with source='regex' must have ≥1 evidence row."""
         cur = evidence_db.conn.cursor()
         cur.execute(
-            "SELECT card_id, tag_id FROM card_tags WHERE source = 'regex'"
+            "SELECT card_name, tag_id FROM card_tags WHERE source = 'regex'"
         )
         regex_tags = cur.fetchall()
 
         assert len(regex_tags) > 0, "Should have regex-generated tags to test"
 
         missing_evidence = []
-        for card_id, tag_id in regex_tags:
+        for card_name, tag_id in regex_tags:
             cur.execute(
                 "SELECT COUNT(*) FROM tag_evidence WHERE card_name = ? AND tag_id = ?",
-                (card_id, tag_id),
+                (card_name, tag_id),
             )
             count = cur.fetchone()[0]
             if count == 0:
                 cur.execute("SELECT name FROM tags WHERE id = ?", (tag_id,))
                 tag_name = cur.fetchone()[0]
-                missing_evidence.append(f"{card_id} / {tag_name}")
+                missing_evidence.append(f"{card_name} / {tag_name}")
 
         assert not missing_evidence, (
             f"These regex tags have no evidence rows:\n" +
@@ -85,13 +83,13 @@ class TestEveryTagHasEvidence:
         """No card_tags row with source='regex' should exist without evidence."""
         cur = evidence_db.conn.cursor()
         cur.execute("""
-            SELECT ct.card_id, t.name
+            SELECT ct.card_name, t.name
             FROM card_tags ct
             JOIN tags t ON ct.tag_id = t.id
             WHERE ct.source = 'regex'
               AND NOT EXISTS (
                   SELECT 1 FROM tag_evidence te
-                  WHERE te.card_name = ct.card_id
+                  WHERE te.card_name = ct.card_name
                     AND te.tag_id = ct.tag_id
               )
         """)
@@ -297,13 +295,55 @@ class TestIdempotency:
         db.close()
 
 
-class TestLivingDeathKnownGap:
+class TestPatternIntegrity:
+    """Verify that _MECHANICAL_PATTERNS is structurally sound."""
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Mass_Reanimate pattern does not yet detect 'returns all creature cards from their graveyard'"
-    )
-    def test_living_death_mass_reanimate_has_evidence(self, evidence_db):
-        """Living Death should have Mass_Reanimate evidence (currently fails — known gap)."""
-        evidence = evidence_db.get_tag_evidence("Living Death", "Mass_Reanimate")
-        assert len(evidence) > 0, "Living Death should have Mass_Reanimate evidence"
+    def test_all_mechanical_patterns_are_valid(self):
+        """Every pattern entry must have correct shape, valid regex, and unique rule_id."""
+        import re as re_module
+        from mtgdeck.tags import _MECHANICAL_PATTERNS
+
+        seen_rule_ids = set()
+        errors = []
+
+        for i, entry in enumerate(_MECHANICAL_PATTERNS):
+            if len(entry) != 4:
+                errors.append(f"Entry {i}: expected 4 fields, got {len(entry)}")
+                continue
+
+            tag_name, pattern, confidence, rule_id = entry
+
+            if not tag_name:
+                errors.append(f"Entry {i}: tag_name is empty")
+            if not pattern:
+                errors.append(f"Entry {i}: pattern is empty")
+            if not isinstance(confidence, (int, float)) or not (0 < confidence <= 1):
+                errors.append(f"Entry {i} ({tag_name}): confidence {confidence} not in (0, 1]")
+            if not rule_id:
+                errors.append(f"Entry {i} ({tag_name}): rule_id is empty")
+            elif not rule_id.startswith("mechanical."):
+                errors.append(f"Entry {i} ({tag_name}): rule_id must start with 'mechanical.', got {rule_id!r}")
+            elif not rule_id.endswith(".v1"):
+                errors.append(f"Entry {i} ({tag_name}): rule_id must end with '.v1', got {rule_id!r}")
+            elif rule_id in seen_rule_ids:
+                errors.append(f"Entry {i} ({tag_name}): duplicate rule_id {rule_id!r}")
+            else:
+                seen_rule_ids.add(rule_id)
+
+            try:
+                re_module.compile(pattern)
+            except re_module.error as e:
+                errors.append(f"Entry {i} ({tag_name}): invalid regex {pattern!r}: {e}")
+
+        assert not errors, (
+            f"{len(errors)} pattern integrity errors:\n" +
+            "\n".join(f"  - {e}" for e in errors)
+        )
+
+    def test_pattern_count_is_expected(self):
+        """Pattern count should not silently drop (catches accidental truncation)."""
+        from mtgdeck.tags import _MECHANICAL_PATTERNS
+        assert len(_MECHANICAL_PATTERNS) >= 90, (
+            f"Expected ≥90 patterns, got {len(_MECHANICAL_PATTERNS)}. "
+            "Check that no patterns were accidentally removed."
+        )

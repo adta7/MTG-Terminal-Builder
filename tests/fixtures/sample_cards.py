@@ -74,7 +74,7 @@ SAMPLE_CARDS = [
         mana_cost="{2}{B}{B}",
         cmc=4,
         type_line="Sorcery",
-        oracle_text="Each player exiles all creature cards from their graveyard. Each player returns all creature cards they exiled this way to the battlefield.",
+        oracle_text="Each player exiles all creature cards from their graveyard, then sacrifices all creatures they control, then puts all cards they exiled this way onto the battlefield.",
     ),
     Card(
         name="Return of the Fallen",
@@ -113,7 +113,7 @@ SAMPLE_CARDS = [
         mana_cost="{2}{B}{B}",
         cmc=4,
         type_line="Creature — Zombie Shaman",
-        oracle_text="{T}, Tap X untapped Zombies you control: Create X 2/2 black Zombie tokens.",
+        oracle_text="{B}, {T}, Sacrifice another creature: Create X 2/2 black Zombie creature tokens, where X is the sacrificed creature's power.",
     ),
     Card(
         name="Bitterblossom",
@@ -207,7 +207,7 @@ SAMPLE_CARDS = [
         mana_cost="{3}{B}{B}",
         cmc=5,
         type_line="Artifact",
-        oracle_text="You may pay life instead of paying mana costs for spells and abilities you control. Whenever you cast a spell, you gain life equal to its mana value.",
+        oracle_text="You may look at the top card of your library at any time.\nYou may play lands and cast spells from the top of your library. If you cast a spell this way, pay life equal to its mana value rather than pay its mana cost.\n{T}, Sacrifice ten nonland permanents: Each opponent loses 10 life.",
     ),
     Card(
         name="Yawgmoth's Will",

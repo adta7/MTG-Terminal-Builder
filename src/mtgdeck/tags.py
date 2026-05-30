@@ -846,17 +846,28 @@ def get_synergies(card_name: str, db, min_strength: float = 0.0) -> list[dict]:
     return db.get_synergies(card_name, min_strength)
 
 
-def _ability_kind_for_match(evidence_text: str, segments) -> str:
-    """Return ability_kind of the segment whose text contains the matched phrase."""
-    evidence_lower = evidence_text.lower().strip()
-    for seg in segments:
-        if evidence_lower in seg.text.lower():
+def _ability_kind_for_span(preprocessed, pattern: str) -> str:
+    """Return ability_kind by locating the pattern in main_text and checking segment spans.
+
+    Uses search_text("main") so the match spans align with segment.start/end offsets,
+    avoiding false matches when the same phrase appears in multiple ability segments.
+    """
+    from .oracle_preprocessor import search_text as preprocess_search
+    spans = preprocess_search(preprocessed, pattern, search_in="main")
+    if not spans:
+        return "other"
+    match_start, _ = spans[0]
+    for seg in preprocessed.segments:
+        if seg.start <= match_start < seg.end:
             return seg.ability_kind
     return "other"
 
 
-def _text_role_for_match(evidence_text: str, ability_kind: str, segments) -> str:
+def _text_role_for_span(preprocessed, pattern: str, ability_kind: str) -> str:
     """Classify the syntactic role of the matched text within its ability.
+
+    Uses span-based segment lookup to avoid ambiguity when a phrase appears
+    in multiple abilities.
 
     Roles:
       cost        — the payment portion of an activated ability (before ':')
@@ -866,35 +877,33 @@ def _text_role_for_match(evidence_text: str, ability_kind: str, segments) -> str
       static      — part of a static ability (ongoing condition)
       unknown     — fallback
     """
-    evidence_lower = evidence_text.lower().strip()
-
-    if ability_kind == "activated":
-        for seg in segments:
-            seg_lower = seg.text.lower()
-            if evidence_lower in seg_lower:
-                colon_pos = seg_lower.find(":")
-                match_pos = seg_lower.find(evidence_lower)
-                if colon_pos != -1 and match_pos < colon_pos:
-                    return "cost"
-                return "effect"
-        return "effect"
-
-    if ability_kind == "triggered":
-        for seg in segments:
-            seg_lower = seg.text.lower()
-            if evidence_lower in seg_lower:
-                comma_pos = seg_lower.find(",")
-                match_pos = seg_lower.find(evidence_lower)
-                if comma_pos != -1 and match_pos < comma_pos:
-                    return "trigger"
-                return "effect"
-        return "effect"
-
     if ability_kind == "replacement":
         return "replacement"
-
     if ability_kind == "static":
         return "static"
+
+    from .oracle_preprocessor import search_text as preprocess_search
+    spans = preprocess_search(preprocessed, pattern, search_in="main")
+    if not spans:
+        return "unknown"
+
+    match_start, _ = spans[0]
+    for seg in preprocessed.segments:
+        if seg.start <= match_start < seg.end:
+            seg_lower = seg.text.lower()
+            rel_pos = match_start - seg.start  # match position within this segment
+
+            if ability_kind == "activated":
+                colon_pos = seg_lower.find(":")
+                if colon_pos != -1 and rel_pos < colon_pos:
+                    return "cost"
+                return "effect"
+
+            if ability_kind == "triggered":
+                comma_pos = seg_lower.find(",")
+                if comma_pos != -1 and rel_pos < comma_pos:
+                    return "trigger"
+                return "effect"
 
     return "unknown"
 
@@ -948,8 +957,8 @@ def tag_mechanical(card: Card, db) -> list[str]:
             # Recover original-case evidence text (lowercasing preserves offsets for ASCII)
             evidence_text = oracle_original[oracle_start:oracle_end]
 
-            ability_kind = _ability_kind_for_match(evidence_text, preprocessed.segments)
-            text_role = _text_role_for_match(evidence_text, ability_kind, preprocessed.segments)
+            ability_kind = _ability_kind_for_span(preprocessed, pattern)
+            text_role = _text_role_for_span(preprocessed, pattern, ability_kind)
 
             success = db.emit_tag_evidence(
                 card_name=card.name,

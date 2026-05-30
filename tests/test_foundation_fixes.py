@@ -104,15 +104,35 @@ class TestFix1ForeignKeyIntegrity:
         db.close()
 
 
-class TestFix2CardIdNaming:
-    """Fix #2: Verify card_id vs card_name consistency.
+class TestFix2CardNameSchema:
+    """Fix #2: Verify both card_tags and tag_evidence use card_name columns."""
 
-    Currently card_id stores card names. This test documents that fact.
-    TODO: Eventually migrate to true Scryfall IDs.
-    """
+    def test_card_tags_uses_card_name_column(self):
+        """card_tags.card_name column should store card names."""
+        db = Database(":memory:")
+        db.init_db()
+        tags.seed_tags(db)
 
-    def test_card_name_schema(self):
-        """Confirm card_name column contains card names."""
+        card_name = "Ashnod's Altar"
+        db.insert_card(Card(
+            name=card_name,
+            mana_cost="{1}",
+            cmc=1,
+            type_line="Artifact",
+            oracle_text="Sacrifice a creature: Add {C}{C}.",
+        ))
+
+        db.tag_card(card_name, "Sacrifice_Outlet", confidence=1.0)
+
+        cur = db.conn.cursor()
+        cur.execute("SELECT card_name FROM card_tags LIMIT 1")
+        result = cur.fetchone()[0]
+        assert result == card_name, "card_tags.card_name should contain the card name"
+
+        db.close()
+
+    def test_tag_evidence_uses_card_name_column(self):
+        """tag_evidence.card_name column should store card names."""
         db = Database(":memory:")
         db.init_db()
         tags.seed_tags(db)
@@ -133,12 +153,10 @@ class TestFix2CardIdNaming:
             evidence_text="Sacrifice a creature:",
         )
 
-        # Query evidence directly to verify card_name contains the name
         cur = db.conn.cursor()
         cur.execute("SELECT card_name FROM tag_evidence LIMIT 1")
         result = cur.fetchone()[0]
-
-        assert result == card_name, "card_name should contain the card name"
+        assert result == card_name, "tag_evidence.card_name should contain the card name"
 
         db.close()
 
@@ -199,55 +217,33 @@ class TestFix3GoldenTestsActuallyValidate:
         db.close()
 
 
-class TestFix4LivingDeathKnownFailure:
-    """Fix #4: Living Death should be marked as a known xfail.
+class TestFix4LivingDeathTagging:
+    """Fix #4: Living Death Mass_Reanimate detection.
 
-    Living Death should be detected as Mass_Reanimate, but the current
-    pattern does not match "returns all creature cards".
+    Fixed by correcting the fixture oracle text to match real Scryfall text.
+    The Mass_Reanimate pattern now correctly detects "puts all cards they exiled
+    this way onto the battlefield".
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Mass_Reanimate pattern does not yet detect 'returns all creature cards from their graveyard'"
-    )
     def test_living_death_mass_reanimate(self):
-        """Living Death should be tagged as Mass_Reanimate (currently fails)."""
+        """Living Death should be tagged as Mass_Reanimate."""
         from fixtures.sample_cards import SAMPLE_CARDS
 
         db = Database(":memory:")
         db.init_db()
         tags.seed_tags(db)
 
-        # Load Living Death
         living_death = next((c for c in SAMPLE_CARDS if c.name == "Living Death"), None)
         assert living_death is not None, "Living Death should be in sample cards"
 
         db.insert_card(living_death)
+        tags.tag_mechanical(living_death, db)
 
-        # Run mechanical tagger
-        mechanical_tags = tags.tag_mechanical(living_death, db)
-        for tag_name in mechanical_tags:
-            db.tag_card(
-                living_death.name,
-                tag_name,
-                confidence=0.90,
-                source="regex",
-            )
-
-        # This assertion currently fails because the pattern doesn't match
         card_tags = db.get_card_tags("Living Death")
         tag_names = {t["name"] for t in card_tags}
 
-        has_mass_reanimate = "Mass_Reanimate" in tag_names
-        assert has_mass_reanimate, (
-            "Living Death should have Mass_Reanimate tag (known gap)"
+        assert "Mass_Reanimate" in tag_names, (
+            f"Living Death should have Mass_Reanimate tag. Got: {tag_names}"
         )
 
         db.close()
-
-    def test_living_death_known_gap_documented(self):
-        """The Living Death gap should be visible in test results."""
-        # This test documents that the gap exists and is tracked
-        # The xfail test above will show as XFAIL (expected failure)
-        # which is better than silently skipping the test
-        assert True, "Living Death gap is documented"
