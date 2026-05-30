@@ -111,8 +111,8 @@ class TestFix2CardIdNaming:
     TODO: Eventually migrate to true Scryfall IDs.
     """
 
-    def test_card_id_stores_card_name(self):
-        """Confirm card_id column contains card names, not numeric IDs."""
+    def test_card_name_schema(self):
+        """Confirm card_name column contains card names."""
         db = Database(":memory:")
         db.init_db()
         tags.seed_tags(db)
@@ -133,12 +133,12 @@ class TestFix2CardIdNaming:
             evidence_text="Sacrifice a creature:",
         )
 
-        # Query evidence directly to verify card_id contains the name
+        # Query evidence directly to verify card_name contains the name
         cur = db.conn.cursor()
-        cur.execute("SELECT card_id FROM tag_evidence LIMIT 1")
+        cur.execute("SELECT card_name FROM tag_evidence LIMIT 1")
         result = cur.fetchone()[0]
 
-        assert result == card_name, "card_id should contain the card name"
+        assert result == card_name, "card_name should contain the card name"
 
         db.close()
 

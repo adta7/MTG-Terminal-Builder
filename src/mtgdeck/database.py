@@ -182,12 +182,12 @@ class Database:
         # Stores evidence for every tag assignment to enable debugging and observability.
         # card_tags is the cache/summary; this table explains the reasoning.
         #
-        # run_id is optional (can be NULL). When provided, it references tagger_runs for audit trail.
-        # SQLite allows NULL values in foreign key columns, so NULL is safe here.
+        # card_name: Currently stores card names. Future: migrate to Scryfall IDs.
+        # run_id: Optional (can be NULL). When provided, references tagger_runs for audit trail.
         cur.execute("""
             CREATE TABLE IF NOT EXISTS tag_evidence (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                card_id TEXT NOT NULL,
+                card_name TEXT NOT NULL,
                 tag_id INTEGER NOT NULL,
                 rule_id TEXT,
                 evidence_text TEXT,
@@ -209,7 +209,7 @@ class Database:
         # Index for evidence queries
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_tag_evidence_card_tag
-            ON tag_evidence(card_id, tag_id)
+            ON tag_evidence(card_name, tag_id)
         """)
 
         cur.execute("""
@@ -841,7 +841,7 @@ class Database:
         cur.execute(
             """
             INSERT INTO tag_evidence (
-                card_id, tag_id, rule_id, evidence_text,
+                card_name, tag_id, rule_id, evidence_text,
                 oracle_start, oracle_end, face_index, segment_id,
                 ability_kind, text_role, confidence, source, run_id,
                 created_at
@@ -881,13 +881,13 @@ class Database:
         cur = self.conn.cursor()
         query = """
             SELECT
-                te.id, te.card_id, t.name as tag_name, t.layer,
+                te.id, te.card_name, t.name as tag_name, t.layer,
                 te.rule_id, te.evidence_text, te.oracle_start, te.oracle_end,
                 te.face_index, te.segment_id, te.ability_kind, te.text_role,
                 te.confidence, te.source, te.run_id, te.created_at
             FROM tag_evidence te
             JOIN tags t ON te.tag_id = t.id
-            WHERE LOWER(te.card_id) = LOWER(?)
+            WHERE LOWER(te.card_name) = LOWER(?)
         """
         params = [card_name]
 
