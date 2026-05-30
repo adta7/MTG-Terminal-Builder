@@ -285,51 +285,32 @@ def getch() -> str:
             return ''
 
         ch = os.read(fd, 1)
-        with open('/tmp/getch.log', 'a') as log:
-            log.write(f"ch={repr(ch)} ")
 
         if ch == b'\x03':
             raise KeyboardInterrupt
 
         if ch == b'\x1b':
             # ESC: check if this is an arrow key sequence or standalone ESC
-            # Use 50ms timeout for continuation bytes - this is very tight but necessary
-            # because we want to distinguish \x1b [A from standalone \x1b quickly
+            # Use 50ms timeout for continuation bytes
             ready, _, _ = select.select([fd], [], [], 0.05)
-            with open('/tmp/getch.log', 'a') as log:
-                log.write(f"after_esc_select={bool(ready)} ")
 
             if ready:
                 ch2 = os.read(fd, 1)
-                with open('/tmp/getch.log', 'a') as log:
-                    log.write(f"ch2={repr(ch2)} ")
 
                 if ch2 == b'[':
                     # Standard CSI sequence (arrow keys)
                     ready, _, _ = select.select([fd], [], [], 0.05)
-                    with open('/tmp/getch.log', 'a') as log:
-                        log.write(f"after_bracket_select={bool(ready)} ")
 
                     if ready:
                         ch3 = os.read(fd, 1)
-                        with open('/tmp/getch.log', 'a') as log:
-                            log.write(f"ch3={repr(ch3)} ")
 
                         if ch3 == b'A':
-                            with open('/tmp/getch.log', 'a') as log:
-                                log.write(f"return=UP\n")
                             return 'UP'
                         elif ch3 == b'B':
-                            with open('/tmp/getch.log', 'a') as log:
-                                log.write(f"return=DOWN\n")
                             return 'DOWN'
                         elif ch3 == b'C':
-                            with open('/tmp/getch.log', 'a') as log:
-                                log.write(f"return=RIGHT\n")
                             return 'RIGHT'
                         elif ch3 == b'D':
-                            with open('/tmp/getch.log', 'a') as log:
-                                log.write(f"return=LEFT\n")
                             return 'LEFT'
                 elif ch2 == b'O':
                     # Alternative SS3 sequence (some terminals)
@@ -337,28 +318,16 @@ def getch() -> str:
                     if ready:
                         ch3 = os.read(fd, 1)
                         if ch3 == b'A':
-                            with open('/tmp/getch.log', 'a') as log:
-                                log.write(f"return=UP(SS3)\n")
                             return 'UP'
                         elif ch3 == b'B':
-                            with open('/tmp/getch.log', 'a') as log:
-                                log.write(f"return=DOWN(SS3)\n")
                             return 'DOWN'
                         elif ch3 == b'C':
-                            with open('/tmp/getch.log', 'a') as log:
-                                log.write(f"return=RIGHT(SS3)\n")
                             return 'RIGHT'
                         elif ch3 == b'D':
-                            with open('/tmp/getch.log', 'a') as log:
-                                log.write(f"return=LEFT(SS3)\n")
                             return 'LEFT'
                 # Unknown escape sequence
-                with open('/tmp/getch.log', 'a') as log:
-                    log.write(f"return=ESC(unknown)\n")
                 return 'ESC'
             # No continuation bytes - this was standalone ESC
-            with open('/tmp/getch.log', 'a') as log:
-                log.write(f"return=ESC(standalone)\n")
             return 'ESC'
 
         return ch.decode('utf-8', errors='replace')
