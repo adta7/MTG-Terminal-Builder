@@ -277,8 +277,8 @@ def getch() -> str:
     try:
         tty.setraw(fd)
 
-        # Wait for first byte with select (10 second timeout to avoid hanging)
-        if not select.select([sys.stdin], [], [], 10)[0]:
+        # Wait for first byte with select (0.5 second timeout for responsiveness)
+        if not select.select([sys.stdin], [], [], 0.5)[0]:
             return None
 
         ch = sys.stdin.buffer.read(1)
