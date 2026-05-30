@@ -360,6 +360,10 @@ def ask_choice_interactive(
         # Wait for keypress
         key = getch()
 
+        # Skip if no key (timeout)
+        if key is None:
+            continue
+
         # Handle keys
         if key == 'UP':
             # Move up, skip disabled items
