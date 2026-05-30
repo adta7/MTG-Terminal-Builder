@@ -26,6 +26,7 @@ import re
 from typing import Optional
 
 from .models import Card
+from .oracle_preprocessor import preprocess_oracle
 
 
 # ─── Built-in Tag Registry ─────────────────────────────────────────────────────
@@ -168,26 +169,35 @@ def _strip_reminder_text(text: str) -> str:
 
 # ─── Oracle Text Auto-Tag Patterns (mechanical layer only) ────────────────────
 #
-# Each entry: (tag_name, regex_pattern, confidence)
+# Each entry: (tag_name, regex_pattern, confidence, rule_id)
+# rule_id uniquely identifies the pattern for evidence tracing.
 # Patterns are applied to REMINDER-TEXT-STRIPPED lowercased oracle text.
 # Keep these precise to avoid false positives.
 
-_MECHANICAL_PATTERNS: list[tuple[str, str, float]] = [
+_MECHANICAL_PATTERNS: list[tuple[str, str, float, str]] = [
 
     # Draw effects
-    ("Draw_Effect",       r"draw (?:a card|(?:\w+ )?cards)", 1.0),
+    ("Draw_Effect",       r"draw (?:a card|(?:\w+ )?cards)", 1.0,
+        "mechanical.draw_effect.draw_cards.v1"),
 
     # Life drain / gain
-    ("Life_Drain",        r"each opponent loses \w+ life", 0.9),
-    ("Life_Drain",        r"target (?:player|opponent) loses \w+ life", 0.9),
+    ("Life_Drain",        r"each opponent loses \w+ life", 0.9,
+        "mechanical.life_drain.each_opponent_loses.v1"),
+    ("Life_Drain",        r"target (?:player|opponent) loses \w+ life", 0.9,
+        "mechanical.life_drain.target_loses.v1"),
     # Compound clause: "sacrifices a permanent, discards a card, and loses 3 life" — Archon of Cruelty
-    ("Life_Drain",        r"and loses? \d+ life", 0.85),
-    ("Life_Gain",         r"you gain \w+ life", 0.9),
-    ("Life_Gain",         r"gain \w+ life", 0.8),
+    ("Life_Drain",        r"and loses? \d+ life", 0.85,
+        "mechanical.life_drain.compound_loses.v1"),
+    ("Life_Gain",         r"you gain \w+ life", 0.9,
+        "mechanical.life_gain.you_gain.v1"),
+    ("Life_Gain",         r"gain \w+ life", 0.8,
+        "mechanical.life_gain.gain_life.v1"),
     # "you gain life equal to the life lost this way" — Exsanguinate, drain spells
-    ("Life_Gain",         r"you gain life equal to", 0.85),
+    ("Life_Gain",         r"you gain life equal to", 0.85,
+        "mechanical.life_gain.gain_equal_to.v1"),
     # "you gain that much life" — Extort reminder text, Consuming Aberration variants
-    ("Life_Gain",         r"you gain that much life", 0.85),
+    ("Life_Gain",         r"you gain that much life", 0.85,
+        "mechanical.life_gain.gain_that_much.v1"),
 
     # Sacrifice outlets — card has an activated ability whose cost includes sacrificing.
     # Requires the colon that separates cost from effect in activated abilities:
@@ -197,224 +207,312 @@ _MECHANICAL_PATTERNS: list[tuple[str, str, float]] = [
     #   "As an additional cost to cast this spell, sacrifice a creature." (Victimize)
     #   "When [name] enters, sacrifice another creature." (Disciple of Bolas)
     # Those are casting costs / ETB triggers, not repeatable outlets.
-    ("Sacrifice_Outlet",  r"sacrifice (?:a|another|any number of) (?:\w+ )*(?:creature|permanent)\s*:", 1.0),
-    ("Sacrifice_Outlet",  r"sacrifice .{1,20}: add", 1.0),
+    ("Sacrifice_Outlet",  r"sacrifice (?:a|another|any number of) (?:\w+ )*(?:creature|permanent)\s*:", 1.0,
+        "mechanical.sacrifice_outlet.sacrifice_cost.v1"),
+    ("Sacrifice_Outlet",  r"sacrifice .{1,20}: add", 1.0,
+        "mechanical.sacrifice_outlet.sacrifice_for_mana.v1"),
 
     # Forced sacrifice (OPPONENTS are forced to sacrifice)
     # Covers: Sheoldred, Grave Pact, Plaguecrafter, Braids, Butcher of Malakir
     # "may sacrifice" (Braids) is still a forced choice — same archetype signal.
-    ("Forced_Sacrifice",  r"(?:that player|each player|each other player|target opponent|each opponent) (?:may )?sacrifice(?:s)? (?:a |an |another |all )?(?:\w+ )?(?:creature|permanent|planeswalker)", 1.0),
+    ("Forced_Sacrifice",  r"(?:that player|each player|each other player|target opponent|each opponent) (?:may )?sacrifice(?:s)? (?:a |an |another |all )?(?:\w+ )?(?:creature|permanent|planeswalker)", 1.0,
+        "mechanical.forced_sacrifice.opponent_sacrifices.v1"),
 
     # Token generation
     # "create a 2/2 black Zombie" — standard format with optional article
-    ("Token_Generation",           r"create (?:a |an )?\d+/\d+ .{1,40}token", 0.9),
+    ("Token_Generation",           r"create (?:a |an )?\d+/\d+ .{1,40}token", 0.9,
+        "mechanical.token_generation.create_pt_token.v1"),
     # "create two 2/2 black Zombie" — number word before the P/T (Grave Titan, etc.)
-    ("Token_Generation",           r"create \w+ \d+/\d+ .{1,40}token", 0.9),
+    ("Token_Generation",           r"create \w+ \d+/\d+ .{1,40}token", 0.9,
+        "mechanical.token_generation.create_count_pt_token.v1"),
     # "create X creature tokens" — generic token count
-    ("Token_Generation",           r"create (?:\w+ )?creature tokens?", 0.85),
+    ("Token_Generation",           r"create (?:\w+ )?creature tokens?", 0.85,
+        "mechanical.token_generation.create_creature_token.v1"),
     # Artifact tokens: Treasure, Food, Blood, Clue, Gold, Ichor, Map
     # "create a Treasure token" — Pitiless Plunderer, Deadly Dispute, etc.
-    ("Token_Generation",           r"create (?:a |an |two |three )?(?:treasure|food|blood|clue|gold|ichor|map) token", 0.9),
+    ("Token_Generation",           r"create (?:a |an |two |three )?(?:treasure|food|blood|clue|gold|ichor|map) token", 0.9,
+        "mechanical.token_generation.create_artifact_token.v1"),
     # "investigate" keyword — always creates a Clue token (reminder text is stripped)
-    ("Token_Generation",           r"\binvestigate\b", 0.85),
+    ("Token_Generation",           r"\binvestigate\b", 0.85,
+        "mechanical.token_generation.investigate.v1"),
 
     # Repeatable token generation — creates tokens on a recurring trigger
     # "at the beginning of your upkeep/turn/end step" or "each player's upkeep"
-    ("Repeatable_Token_Generation", r"at the beginning of (?:your|each|each player's) (?:upkeep|turn|end step).{1,80}create", 0.95),
+    ("Repeatable_Token_Generation", r"at the beginning of (?:your|each|each player's) (?:upkeep|turn|end step).{1,80}create", 0.95,
+        "mechanical.repeatable_token.upkeep_create.v1"),
     # Whenever-based repeatable tokens — triggered on a recurring event on a permanent
-    ("Repeatable_Token_Generation", r"whenever .{1,60}create a .{1,30}token", 0.85),
+    ("Repeatable_Token_Generation", r"whenever .{1,60}create a .{1,30}token", 0.85,
+        "mechanical.repeatable_token.whenever_create.v1"),
 
     # Reanimation (to battlefield) — single target
     # Pattern 1: "Return target creature card from a graveyard to the battlefield"
-    ("Reanimation",       r"return .{1,80}graveyard to the battlefield", 1.0),
+    ("Reanimation",       r"return .{1,80}graveyard to the battlefield", 1.0,
+        "mechanical.reanimation.graveyard_to_battlefield.v1"),
     # Pattern 2: Aura-based reanimate (Animate Dead, Dance of the Dead)
-    ("Reanimation",       r"return enchanted creature card to the battlefield", 0.95),
+    ("Reanimation",       r"return enchanted creature card to the battlefield", 0.95,
+        "mechanical.reanimation.aura_enchanted_card.v1"),
 
     # Mass reanimation — returns many creatures at once
     # Living Death: "puts all cards they exiled this way onto the battlefield"
-    ("Mass_Reanimate",    r"put(?:s)? all .{0,40}cards?.{1,50}onto the battlefield", 0.95),
+    ("Mass_Reanimate",    r"put(?:s)? all .{0,40}cards?.{1,50}onto the battlefield", 0.95,
+        "mechanical.mass_reanimate.all_cards_to_battlefield.v1"),
     # Wake the Dead: "Return X target creature cards from your graveyard to the battlefield"
-    ("Mass_Reanimate",    r"return (?:up to )?\w+ target creature cards? from", 0.95),
+    ("Mass_Reanimate",    r"return (?:up to )?\w+ target creature cards? from", 0.95,
+        "mechanical.mass_reanimate.multiple_target_creatures.v1"),
 
     # Recursion (to hand)
-    ("Recursion_To_Hand",          r"return .{1,40}graveyard to (?:its owner's|your) hand", 0.9),
+    ("Recursion_To_Hand",          r"return .{1,40}graveyard to (?:its owner's|your) hand", 0.9,
+        "mechanical.recursion_to_hand.graveyard_to_hand.v1"),
 
     # Self-recursion — card returns itself from graveyard
     # Modern Scryfall oracle standardizes self-recursion as "return this card from your graveyard"
     # Covers: Reassembling Skeleton, Bloodghast, Nether Traitor, and similar.
-    ("Return_Self_From_Graveyard", r"return this card from your graveyard to", 0.95),
+    ("Return_Self_From_Graveyard", r"return this card from your graveyard to", 0.95,
+        "mechanical.return_self.this_card_from_graveyard.v1"),
     # Older/grant wording — "when this creature dies, return it to the battlefield" (Abnormal Endurance)
-    ("Return_Self_From_Graveyard", r"when this creature dies.{1,60}return it to the battlefield", 0.9),
+    ("Return_Self_From_Graveyard", r"when this creature dies.{1,60}return it to the battlefield", 0.9,
+        "mechanical.return_self.dies_return_to_battlefield.v1"),
 
     # Mana doublers / multipliers
-    ("Mana_Multiplier",   r"add an amount of mana equal to", 0.95),
-    ("Mana_Multiplier",   r"for each swamp you control, add", 0.95),
-    ("Mana_Multiplier",   r"doubles the mana", 0.95),
-    ("Mana_Multiplier",   r"add that much mana of any (?:one )?(?:type|color)", 0.85),
+    ("Mana_Multiplier",   r"add an amount of mana equal to", 0.95,
+        "mechanical.mana_multiplier.add_amount_equal_to.v1"),
+    ("Mana_Multiplier",   r"for each swamp you control, add", 0.95,
+        "mechanical.mana_multiplier.per_swamp_add.v1"),
+    ("Mana_Multiplier",   r"doubles the mana", 0.95,
+        "mechanical.mana_multiplier.doubles_mana.v1"),
+    ("Mana_Multiplier",   r"add that much mana of any (?:one )?(?:type|color)", 0.85,
+        "mechanical.mana_multiplier.add_that_much.v1"),
     # "Whenever you tap a Swamp for mana, add an additional {B}" — Crypt Ghast, Magus of the Coffers style
-    ("Mana_Multiplier",   r"add an additional \{[wubrgcx]\}", 0.9),
+    ("Mana_Multiplier",   r"add an additional \{[wubrgcx]\}", 0.9,
+        "mechanical.mana_multiplier.add_additional_symbol.v1"),
     # "Whenever you tap a land for mana, add one mana of any type" — general tap doublers
-    ("Mana_Multiplier",   r"whenever you tap .{1,30}for mana, add", 0.9),
+    ("Mana_Multiplier",   r"whenever you tap .{1,30}for mana, add", 0.9,
+        "mechanical.mana_multiplier.tap_for_mana_add.v1"),
     # "its controller adds one mana of that color" — Gauntlet of Power-style ability-text doubling
     # (the parenthetical "This effect doubles the mana..." is stripped as reminder text)
-    ("Mana_Multiplier",   r"adds one mana of that color", 0.85),
+    ("Mana_Multiplier",   r"adds one mana of that color", 0.85,
+        "mechanical.mana_multiplier.adds_one_mana.v1"),
 
     # Mana production (non-land permanents)
-    ("Mana_Production",   r"add \{[wubrgc]\}", 0.9),
-    ("Mana_Production",   r"add (?:one|two|three) mana", 0.9),
+    ("Mana_Production",   r"add \{[wubrgc]\}", 0.9,
+        "mechanical.mana_production.add_color_symbol.v1"),
+    ("Mana_Production",   r"add (?:one|two|three) mana", 0.9,
+        "mechanical.mana_production.add_word_mana.v1"),
 
     # Tutors
-    ("Tutor_Effect",      r"search your library for (?:a |an |any |up to )", 1.0),
+    ("Tutor_Effect",      r"search your library for (?:a |an |any |up to )", 1.0,
+        "mechanical.tutor_effect.search_library_for.v1"),
 
     # Board wipes
-    ("Board_Wipe",        r"destroy all (?:creatures|permanents|artifacts|enchantments|nonland)", 1.0),
-    ("Board_Wipe",        r"exile all (?:creatures|permanents|nonland)", 1.0),
+    ("Board_Wipe",        r"destroy all (?:creatures|permanents|artifacts|enchantments|nonland)", 1.0,
+        "mechanical.board_wipe.destroy_all.v1"),
+    ("Board_Wipe",        r"exile all (?:creatures|permanents|nonland)", 1.0,
+        "mechanical.board_wipe.exile_all.v1"),
     # Stat-based board wipe — "all creatures get -X/-X" (Toxic Deluge, Mutilate, etc.)
-    ("Board_Wipe",        r"all creatures get -\w+/-\w+", 0.95),
+    ("Board_Wipe",        r"all creatures get -\w+/-\w+", 0.95,
+        "mechanical.board_wipe.minus_stats.v1"),
 
     # Graveyard hate
-    ("Graveyard_Hate",    r"exile (?:all cards in|target card from|each card from) (?:\w+ )?graveyard", 0.9),
+    ("Graveyard_Hate",    r"exile (?:all cards in|target card from|each card from) (?:\w+ )?graveyard", 0.9,
+        "mechanical.graveyard_hate.exile_graveyard.v1"),
 
     # Discard
-    ("Discard_Effect",    r"(?:each player|target player|each opponent) discards", 0.9),
+    ("Discard_Effect",    r"(?:each player|target player|each opponent) discards", 0.9,
+        "mechanical.discard_effect.player_discards.v1"),
     # "each player who can't [sacrifice] discards a card" — Plaguecrafter, Fleshbag Marauder
-    ("Discard_Effect",    r"each player who can't discards", 0.85),
+    ("Discard_Effect",    r"each player who can't discards", 0.85,
+        "mechanical.discard_effect.cant_sacrifice_discards.v1"),
     # "that player discards a card" — Braids conditional discard
-    ("Discard_Effect",    r"that player discards", 0.85),
+    ("Discard_Effect",    r"that player discards", 0.85,
+        "mechanical.discard_effect.that_player_discards.v1"),
 
     # Self-mill
-    ("Self_Mill",         r"put the top \w+ cards? of your library into your graveyard", 0.9),
-    ("Self_Mill",         r"mill \w+ cards?", 0.8),
+    ("Self_Mill",         r"put the top \w+ cards? of your library into your graveyard", 0.9,
+        "mechanical.self_mill.top_library_to_graveyard.v1"),
+    ("Self_Mill",         r"mill \w+ cards?", 0.8,
+        "mechanical.self_mill.mill_keyword.v1"),
 
     # Cost reduction
-    ("Cost_Reduction",    r"costs? \{[0-9]\} less", 0.85),
-    ("Cost_Reduction",    r"costs? \w+ less to cast", 0.85),
+    ("Cost_Reduction",    r"costs? \{[0-9]\} less", 0.85,
+        "mechanical.cost_reduction.mana_symbol_less.v1"),
+    ("Cost_Reduction",    r"costs? \w+ less to cast", 0.85,
+        "mechanical.cost_reduction.word_less_to_cast.v1"),
 
     # Life payment — life used as a cost or resource substitute
     # "pay X life" as an additional cost (Toxic Deluge, Ad Nauseam)
-    ("Life_Payment",      r"as an additional cost.{1,40}pay \w+ life", 0.95),
+    ("Life_Payment",      r"as an additional cost.{1,40}pay \w+ life", 0.95,
+        "mechanical.life_payment.additional_cost_life.v1"),
     # "pay 2 life rather than pay that mana" — K'rrik, Phyrexian mana cards
-    ("Life_Payment",      r"pay \d+ life rather than", 0.95),
+    ("Life_Payment",      r"pay \d+ life rather than", 0.95,
+        "mechanical.life_payment.pay_life_rather_than.v1"),
     # "you draw a card and you lose 1 life" — Phyrexian Arena style (life drain as card cost)
-    ("Life_Payment",      r"draw a card and (?:you )?(?:lose|pay) \d+ life", 0.85),
+    ("Life_Payment",      r"draw a card and (?:you )?(?:lose|pay) \d+ life", 0.85,
+        "mechanical.life_payment.draw_and_lose_life.v1"),
 
     # Counters
-    ("Counter_Spell",     r"counter target (?:spell|ability)", 1.0),
-    ("Counter_Spell",     r"counter target (?:instant|sorcery|creature|artifact|enchantment) spell", 1.0),
+    ("Counter_Spell",     r"counter target (?:spell|ability)", 1.0,
+        "mechanical.counter_spell.counter_target.v1"),
+    ("Counter_Spell",     r"counter target (?:instant|sorcery|creature|artifact|enchantment) spell", 1.0,
+        "mechanical.counter_spell.counter_type_spell.v1"),
 
     # Permanent scaling — power scales with how many permanents/lands/symbols are on the battlefield
     # "for each Swamp you control" — Lashwrithe, Nightmare, Crypt Ghast extort
-    ("Permanent_Scaling",  r"for each swamp you control", 0.9),
+    ("Permanent_Scaling",  r"for each swamp you control", 0.9,
+        "mechanical.permanent_scaling.per_swamp.v1"),
     # "for each [type] you control" — generic scaling (devotion, tribal, etc.)
-    ("Permanent_Scaling",  r"for each (?:land|creature|artifact|enchantment|permanent) you control", 0.85),
+    ("Permanent_Scaling",  r"for each (?:land|creature|artifact|enchantment|permanent) you control", 0.85,
+        "mechanical.permanent_scaling.per_permanent_type.v1"),
     # "equal to the number of [something] you control"
-    ("Permanent_Scaling",  r"equal to the number of .{1,30}you control", 0.85),
+    ("Permanent_Scaling",  r"equal to the number of .{1,30}you control", 0.85,
+        "mechanical.permanent_scaling.equal_to_count.v1"),
 
     # Scales with deaths — accumulates power over time as creatures die (counters, mana, damage)
     # "whenever a creature dies, put a counter" — Black Market, Dread Presence, etc.
-    ("Scales_With_Deaths", r"whenever .{1,30}creature.{1,20}dies?, (?:put|place) .{1,20}counter", 0.9),
+    ("Scales_With_Deaths", r"whenever .{1,30}creature.{1,20}dies?, (?:put|place) .{1,20}counter", 0.9,
+        "mechanical.scales_with_deaths.dies_put_counter.v1"),
     # "for each [color] creature card in your graveyard" — Crypt of Agadeem and similar
-    ("Scales_With_Deaths", r"for each (?:\w+ )?creature card in (?:your|their|all) graveyard", 0.85),
+    ("Scales_With_Deaths", r"for each (?:\w+ )?creature card in (?:your|their|all) graveyard", 0.85,
+        "mechanical.scales_with_deaths.per_graveyard_creature.v1"),
 
     # Death triggers — matches "whenever [anything] creature(s) dies/die"
     # Covers: "whenever a creature dies", "whenever another creature dies",
     #         "whenever Blood Artist or another creature dies", etc.
-    ("Death_Trigger",     r"whenever .{1,40}creature(?:s)? (?:you control )?(?:dies|die)", 0.9),
+    ("Death_Trigger",     r"whenever .{1,40}creature(?:s)? (?:you control )?(?:dies|die)", 0.9,
+        "mechanical.death_trigger.whenever_creature_dies.v1"),
 
     # Trigger doublers — makes other triggered abilities fire again. Major engine amplifier.
-    ("Trigger_Doubler",   r"triggers? an additional time", 0.95),
-    ("Trigger_Doubler",   r"triggers? twice", 0.95),
-    ("Trigger_Doubler",   r"each of those triggered abilities triggers an additional time", 0.95),
+    ("Trigger_Doubler",   r"triggers? an additional time", 0.95,
+        "mechanical.trigger_doubler.additional_time.v1"),
+    ("Trigger_Doubler",   r"triggers? twice", 0.95,
+        "mechanical.trigger_doubler.triggers_twice.v1"),
+    ("Trigger_Doubler",   r"each of those triggered abilities triggers an additional time", 0.95,
+        "mechanical.trigger_doubler.each_ability_additional.v1"),
 
     # Upkeep / main-phase / end-step triggers — fires every turn, strong recurring value signal.
     # Covers: "at the beginning of your upkeep", "each opponent's upkeep",
     #         "each other player's upkeep" (Braids), "your first main phase", "your end step".
-    ("Upkeep_Trigger",    r"at the beginning of (?:your|each|each player's|each other player's|each opponent's) (?:upkeep|precombat main phase|first main phase|end step)", 0.95),
+    ("Upkeep_Trigger",    r"at the beginning of (?:your|each|each player's|each other player's|each opponent's) (?:upkeep|precombat main phase|first main phase|end step)", 0.95,
+        "mechanical.upkeep_trigger.at_beginning.v1"),
 
     # ETB triggers
     # Pattern 1: classic wording — "when [name] enters the battlefield"
-    ("ETB_Trigger",       r"when (?:this|it|.{1,20}) enters the battlefield", 0.8),
+    ("ETB_Trigger",       r"when (?:this|it|.{1,20}) enters the battlefield", 0.8,
+        "mechanical.etb_trigger.when_enters_classic.v1"),
     # Pattern 2: modern Oracle wording (post-2022) — "when/whenever this creature enters[, / or attacks]"
-    ("ETB_Trigger",       r"when(?:ever)? (?:this|.{1,30}) enters(?:,| or)", 0.8),
+    ("ETB_Trigger",       r"when(?:ever)? (?:this|.{1,30}) enters(?:,| or)", 0.8,
+        "mechanical.etb_trigger.when_enters_modern.v1"),
 
     # Targeted removal
     # Allow optional qualifier before the permanent type: "nonblack", "tapped", "nonartifact", etc.
-    ("Targeted_Removal",  r"destroy target (?:\w+ )?(?:creature|permanent|artifact|enchantment|planeswalker)", 1.0),
-    ("Targeted_Removal",  r"exile target (?:\w+ )?(?:creature|permanent|artifact|enchantment|planeswalker)", 1.0),
+    ("Targeted_Removal",  r"destroy target (?:\w+ )?(?:creature|permanent|artifact|enchantment|planeswalker)", 1.0,
+        "mechanical.targeted_removal.destroy_target.v1"),
+    ("Targeted_Removal",  r"exile target (?:\w+ )?(?:creature|permanent|artifact|enchantment|planeswalker)", 1.0,
+        "mechanical.targeted_removal.exile_target.v1"),
 
     # Damage
-    ("Damage_Effect",     r"deals? \w+ damage to (?:any target|target creature|each creature|each player|each opponent)", 0.9),
+    ("Damage_Effect",     r"deals? \w+ damage to (?:any target|target creature|each creature|each player|each opponent)", 0.9,
+        "mechanical.damage_effect.deals_damage.v1"),
 
     # Bounce
-    ("Bounce_Effect",     r"return target .{1,30} to (?:its owner's|their owner's) hand", 0.9),
+    ("Bounce_Effect",     r"return target .{1,30} to (?:its owner's|their owner's) hand", 0.9,
+        "mechanical.bounce_effect.return_to_hand.v1"),
 
     # Protection
-    ("Protection_Effect", r"(?:has|have|gains?) hexproof", 0.9),
-    ("Protection_Effect", r"(?:has|have|gains?) indestructible", 0.9),
-    ("Protection_Effect", r"(?:has|have|gains?) shroud", 0.9),
+    ("Protection_Effect", r"(?:has|have|gains?) hexproof", 0.9,
+        "mechanical.protection.hexproof.v1"),
+    ("Protection_Effect", r"(?:has|have|gains?) indestructible", 0.9,
+        "mechanical.protection.indestructible.v1"),
+    ("Protection_Effect", r"(?:has|have|gains?) shroud", 0.9,
+        "mechanical.protection.shroud.v1"),
 
     # Evasion — can push damage past blockers
     # Hard keywords: flying, menace, fear, shadow, intimidate
-    ("Evasion",           r"\bflying\b", 1.0),
-    ("Evasion",           r"\bmenace\b", 1.0),
-    ("Evasion",           r"\bfear\b", 0.9),        # older keyword; low false-positive risk in MTG oracle
-    ("Evasion",           r"\bshadow\b", 0.9),
-    ("Evasion",           r"\bintimidate\b", 0.95),
+    ("Evasion",           r"\bflying\b", 1.0,
+        "mechanical.evasion.flying.v1"),
+    ("Evasion",           r"\bmenace\b", 1.0,
+        "mechanical.evasion.menace.v1"),
+    ("Evasion",           r"\bfear\b", 0.9,
+        "mechanical.evasion.fear.v1"),
+    ("Evasion",           r"\bshadow\b", 0.9,
+        "mechanical.evasion.shadow.v1"),
+    ("Evasion",           r"\bintimidate\b", 0.95,
+        "mechanical.evasion.intimidate.v1"),
     # Landwalk — unblockable when defending player controls that land type
-    ("Evasion",           r"\b(?:swamp|forest|island|mountain|plains|land)walk\b", 0.9),
+    ("Evasion",           r"\b(?:swamp|forest|island|mountain|plains|land)walk\b", 0.9,
+        "mechanical.evasion.landwalk.v1"),
     # "can't be blocked" / "is unblockable" — two oracle wordings for unblockability
-    ("Evasion",           r"can't be blocked", 0.95),
-    ("Evasion",           r"\bunblockable\b", 0.95),
+    ("Evasion",           r"can't be blocked", 0.95,
+        "mechanical.evasion.cant_be_blocked.v1"),
+    ("Evasion",           r"\bunblockable\b", 0.95,
+        "mechanical.evasion.unblockable.v1"),
 
     # Lifelink — combat damage as life gain
-    ("Lifelink",          r"\blifelink\b", 1.0),
-    ("Lifelink",          r"gains? lifelink", 0.9),
+    ("Lifelink",          r"\blifelink\b", 1.0,
+        "mechanical.lifelink.keyword.v1"),
+    ("Lifelink",          r"gains? lifelink", 0.9,
+        "mechanical.lifelink.gains.v1"),
 
     # Deathtouch — lethal damage regardless of toughness
-    ("Deathtouch",        r"\bdeathtouch\b", 1.0),
-    ("Deathtouch",        r"gains? deathtouch", 0.9),
+    ("Deathtouch",        r"\bdeathtouch\b", 1.0,
+        "mechanical.deathtouch.keyword.v1"),
+    ("Deathtouch",        r"gains? deathtouch", 0.9,
+        "mechanical.deathtouch.gains.v1"),
 
     # Looting — draw-then-discard or discard-then-draw
     # "draw two cards, then discard two cards" — Faithless Looting, Careful Study
-    ("Looting_Effect",    r"draw .{1,30},? then discard", 0.9),
+    ("Looting_Effect",    r"draw .{1,30},? then discard", 0.9,
+        "mechanical.looting.draw_then_discard.v1"),
     # "discard a card, then draw two cards" — Thrill of Possibility, Wild Guess
-    ("Looting_Effect",    r"discard .{1,30},? then draw", 0.9),
+    ("Looting_Effect",    r"discard .{1,30},? then draw", 0.9,
+        "mechanical.looting.discard_then_draw.v1"),
 
     # Combat triggers — fires when something attacks or deals combat damage
     # "whenever [X] attacks" — attack trigger
-    ("Combat_Trigger",    r"whenever .{1,40} attacks?[,\.]", 0.85),
+    ("Combat_Trigger",    r"whenever .{1,40} attacks?[,\.]", 0.85,
+        "mechanical.combat_trigger.whenever_attacks.v1"),
     # "whenever [X] deals combat damage to" — combat damage trigger
-    ("Combat_Trigger",    r"whenever .{1,40} deals? combat damage to", 0.9),
+    ("Combat_Trigger",    r"whenever .{1,40} deals? combat damage to", 0.9,
+        "mechanical.combat_trigger.deals_combat_damage.v1"),
 
     # Land search — ramp via fetching lands from the library
     # "search your library for a basic land card" / "a land card" / "a Swamp"
-    ("Search_For_Land",   r"search your library for (?:a |an |up to (?:\w+ )?)?(?:basic )?(?:land|swamp|forest|island|plains|mountain)", 0.95),
+    ("Search_For_Land",   r"search your library for (?:a |an |up to (?:\w+ )?)?(?:basic )?(?:land|swamp|forest|island|plains|mountain)", 0.95,
+        "mechanical.search_for_land.search_library_land.v1"),
 
     # Graveyard tutors — search library and PUT cards directly into the graveyard.
     # Covers: Entomb, Buried Alive, Unmarked Grave, Jarad's Orders (partial).
     # Deliberately distinct from Search_For_Land / Tutor_Effect (which goes to hand).
-    ("Graveyard_Tutor",   r"search your library for .{0,60}?put (?:it|them|that card) into your graveyard", 0.95),
+    ("Graveyard_Tutor",   r"search your library for .{0,60}?put (?:it|them|that card) into your graveyard", 0.95,
+        "mechanical.graveyard_tutor.search_put_to_graveyard.v1"),
 
     # Undying / Persist — returns after dying with a counter change
-    ("Undying_Persist",   r"\bundying\b", 1.0),
-    ("Undying_Persist",   r"\bpersist\b", 1.0),
+    ("Undying_Persist",   r"\bundying\b", 1.0,
+        "mechanical.undying_persist.undying.v1"),
+    ("Undying_Persist",   r"\bpersist\b", 1.0,
+        "mechanical.undying_persist.persist.v1"),
 
     # Extort — drains life on every spell cast
-    ("Extort",            r"\bextort\b", 1.0),
+    ("Extort",            r"\bextort\b", 1.0,
+        "mechanical.extort.keyword.v1"),
 
     # Devotion effects — power scales with colored mana symbols among permanents
     # "your devotion to black" — Gary, Erebos, Nykthos
-    ("Devotion_Effect",   r"(?:your|each player's) devotion to (?:\w+|any color)", 0.95),
+    ("Devotion_Effect",   r"(?:your|each player's) devotion to (?:\w+|any color)", 0.95,
+        "mechanical.devotion.devotion_to_color.v1"),
 
     # X-spell scaling — effect scales with X mana spent (Exsanguinate, Torment of Hailfire, etc.)
     # Life-drain X: "each opponent loses X life"
-    ("X_Spell_Effect",    r"each opponent loses x life", 0.95),
+    ("X_Spell_Effect",    r"each opponent loses x life", 0.95,
+        "mechanical.x_spell.each_opponent_loses_x.v1"),
     # Targeted X: "target player loses X life"
-    ("X_Spell_Effect",    r"target player loses x life", 0.90),
+    ("X_Spell_Effect",    r"target player loses x life", 0.90,
+        "mechanical.x_spell.target_loses_x.v1"),
     # Damage X: "deals X damage to each opponent / any target"
-    ("X_Spell_Effect",    r"deals? x damage", 0.90),
+    ("X_Spell_Effect",    r"deals? x damage", 0.90,
+        "mechanical.x_spell.deals_x_damage.v1"),
     # Repeated effect: "repeat the following process X times" (Torment of Hailfire)
-    ("X_Spell_Effect",    r"repeat the following process x times", 0.95),
+    ("X_Spell_Effect",    r"repeat the following process x times", 0.95,
+        "mechanical.x_spell.repeat_x_times.v1"),
 ]
 
 
@@ -748,6 +846,59 @@ def get_synergies(card_name: str, db, min_strength: float = 0.0) -> list[dict]:
     return db.get_synergies(card_name, min_strength)
 
 
+def _ability_kind_for_match(evidence_text: str, segments) -> str:
+    """Return ability_kind of the segment whose text contains the matched phrase."""
+    evidence_lower = evidence_text.lower().strip()
+    for seg in segments:
+        if evidence_lower in seg.text.lower():
+            return seg.ability_kind
+    return "other"
+
+
+def _text_role_for_match(evidence_text: str, ability_kind: str, segments) -> str:
+    """Classify the syntactic role of the matched text within its ability.
+
+    Roles:
+      cost        — the payment portion of an activated ability (before ':')
+      trigger     — the condition clause of a triggered ability (before first ',')
+      effect      — the resolving effect
+      replacement — part of a replacement effect ("instead")
+      static      — part of a static ability (ongoing condition)
+      unknown     — fallback
+    """
+    evidence_lower = evidence_text.lower().strip()
+
+    if ability_kind == "activated":
+        for seg in segments:
+            seg_lower = seg.text.lower()
+            if evidence_lower in seg_lower:
+                colon_pos = seg_lower.find(":")
+                match_pos = seg_lower.find(evidence_lower)
+                if colon_pos != -1 and match_pos < colon_pos:
+                    return "cost"
+                return "effect"
+        return "effect"
+
+    if ability_kind == "triggered":
+        for seg in segments:
+            seg_lower = seg.text.lower()
+            if evidence_lower in seg_lower:
+                comma_pos = seg_lower.find(",")
+                match_pos = seg_lower.find(evidence_lower)
+                if comma_pos != -1 and match_pos < comma_pos:
+                    return "trigger"
+                return "effect"
+        return "effect"
+
+    if ability_kind == "replacement":
+        return "replacement"
+
+    if ability_kind == "static":
+        return "static"
+
+    return "unknown"
+
+
 def tag_mechanical(card: Card, db) -> list[str]:
     """
     Auto-tag a card's mechanical layer using oracle text patterns.
@@ -772,12 +923,17 @@ def tag_mechanical(card: Card, db) -> list[str]:
     # Strip parenthetical reminder text before matching.
     # This prevents false positives like Treasure token reminder text "(Add one mana
     # of any color)" triggering Mana_Production on cards that create Treasure tokens.
-    oracle = _strip_reminder_text((card.oracle_text or "").lower())
+    oracle_raw = card.oracle_text or ""
+    oracle_original = _strip_reminder_text(oracle_raw)      # original case, no reminder text
+    oracle = oracle_original.lower()                         # lowercase for pattern matching
     is_land = "Land" in (card.type_line or "")
     applied = []
 
-    for tag_name, pattern, confidence in _MECHANICAL_PATTERNS:
-        if re.search(pattern, oracle):
+    preprocessed = preprocess_oracle(card.name, oracle_raw)
+
+    for tag_name, pattern, confidence, rule_id in _MECHANICAL_PATTERNS:
+        match = re.search(pattern, oracle)
+        if match:
             # Lands produce mana by definition — "add {B}" in a land's oracle text
             # is its basic function, not a special ability. Only tag Mana_Production
             # for lands that produce *extra* or *scaling* mana (Crypt of Agadeem,
@@ -786,7 +942,27 @@ def tag_mechanical(card: Card, db) -> list[str]:
             if tag_name == "Mana_Production" and is_land:
                 if not re.search(r"for each|for every|twice|double", oracle):
                     continue
-            success = db.tag_card(card.name, tag_name, confidence, source="regex")
+
+            oracle_start = match.start()
+            oracle_end = match.end()
+            # Recover original-case evidence text (lowercasing preserves offsets for ASCII)
+            evidence_text = oracle_original[oracle_start:oracle_end]
+
+            ability_kind = _ability_kind_for_match(evidence_text, preprocessed.segments)
+            text_role = _text_role_for_match(evidence_text, ability_kind, preprocessed.segments)
+
+            success = db.emit_tag_evidence(
+                card_name=card.name,
+                tag_name=tag_name,
+                rule_id=rule_id,
+                evidence_text=evidence_text,
+                oracle_start=oracle_start,
+                oracle_end=oracle_end,
+                ability_kind=ability_kind,
+                text_role=text_role,
+                confidence=confidence,
+                source="regex",
+            )
             if success:
                 applied.append(tag_name)
 

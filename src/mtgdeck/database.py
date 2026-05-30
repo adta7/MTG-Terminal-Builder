@@ -837,6 +837,32 @@ class Database:
 
         cur = self.conn.cursor()
 
+        # Idempotency: when run_id is NULL, skip duplicate evidence for the same
+        # card/tag/rule/span/source combination. This is "current-state" semantics —
+        # running tag_mechanical() twice produces the same evidence, not twice as many rows.
+        # When run_id is present, always insert (audit-log semantics).
+        if not run_id:
+            cur.execute(
+                """
+                SELECT id FROM tag_evidence
+                WHERE card_name = ? AND tag_id = ?
+                  AND rule_id = ? AND source = ?
+                  AND oracle_start IS ? AND oracle_end IS ?
+                LIMIT 1
+                """,
+                (card_name, tag_id, rule_id or "", source, oracle_start, oracle_end),
+            )
+            if cur.fetchone():
+                self.tag_card_if_higher(
+                    card_name=card_name,
+                    tag_name=tag_name,
+                    confidence=confidence,
+                    source=source,
+                    note=f"rule_id={rule_id}" if rule_id else "",
+                )
+                self.conn.commit()
+                return True
+
         # Emit evidence
         cur.execute(
             """
