@@ -258,7 +258,8 @@ _MECHANICAL_PATTERNS: list[tuple[str, str, float, str]] = [
     ("Mass_Reanimate",    r"put(?:s)? all .{0,40}cards?.{1,50}onto the battlefield", 0.95,
         "mechanical.mass_reanimate.all_cards_to_battlefield.v1"),
     # Wake the Dead: "Return X target creature cards from your graveyard to the battlefield"
-    ("Mass_Reanimate",    r"return (?:up to )?\w+ target creature cards? from", 0.95,
+    # Requires "battlefield" within 60 chars to exclude hand-return effects (Macabre Waltz).
+    ("Mass_Reanimate",    r"return (?:up to )?\w+ target creature cards? from .{1,60}battlefield", 0.95,
         "mechanical.mass_reanimate.multiple_target_creatures.v1"),
 
     # Recursion (to hand)
