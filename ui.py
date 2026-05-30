@@ -13,7 +13,7 @@ import termios
 import select
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, List, Dict, Any, Set
+from typing import Optional, List, Dict, Any
 
 from rich.console import Console
 from rich.panel import Panel
@@ -40,11 +40,20 @@ class MenuItem:
 # ─── Session State ───────────────────────────────────────────────────────────
 
 @dataclass
+class SearchHistoryEntry:
+    """A single search history entry."""
+
+    query: str
+    timestamp: datetime
+    results: List[Dict[str, Any]]  # snapshot of top N results
+
+
+@dataclass
 class SessionState:
     """Shared session state across the app (in-memory, not persisted yet)."""
 
-    pinned_cards: Set[str] = field(default_factory=set)
-    """Set of pinned card names for reference during the session."""
+    pinned_cards: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    """Pinned cards, keyed by stable card ID: {id: card_dict}."""
 
     recent_searches: List[str] = field(default_factory=list)
     """Recent search queries (for future search history)."""
@@ -52,17 +61,43 @@ class SessionState:
     active_deck: Optional[str] = None
     """Currently active deck name (if any)."""
 
-    def pin_card(self, card_name: str):
-        """Add a card to pinned set."""
-        self.pinned_cards.add(card_name)
+    history: List[SearchHistoryEntry] = field(default_factory=list)
+    """Search history entries (session-local, not persisted)."""
 
-    def unpin_card(self, card_name: str):
-        """Remove a card from pinned set."""
-        self.pinned_cards.discard(card_name)
+    def _card_key(self, card_data: Dict[str, Any]) -> str:
+        return card_data.get("id") or card_data.get("oracle_id") or card_data.get("name", "Unknown")
 
-    def is_pinned(self, card_name: str) -> bool:
-        """Check if card is pinned."""
-        return card_name in self.pinned_cards
+    def pin_card(self, card_data: Dict[str, Any]):
+        """Add a card to pinned dict with full card data."""
+        key = self._card_key(card_data)
+        self.pinned_cards[key] = card_data
+
+    def unpin_card(self, card_key: str):
+        """Remove a card from pinned dict by key."""
+        self.pinned_cards.pop(card_key, None)
+
+    def is_pinned(self, card_data: Dict[str, Any]) -> bool:
+        """Check if a card is pinned."""
+        key = self._card_key(card_data)
+        return key in self.pinned_cards
+
+    def get_pinned_cards(self) -> List[Dict[str, Any]]:
+        """Return list of pinned cards in insertion order."""
+        return list(self.pinned_cards.values())
+
+    def add_search_history(self, query: str, results: List[Dict[str, Any]], max_entries: int = 50):
+        """Record a search in history, capped at max_entries. Dedup consecutive identical queries."""
+        entry = SearchHistoryEntry(query=query, timestamp=datetime.now(), results=results[:10])
+        # Deduplicate consecutive identical queries
+        if self.history and self.history[-1].query == query:
+            self.history[-1] = entry
+        else:
+            self.history.append(entry)
+        self.history = self.history[-max_entries:]
+
+    def get_history(self) -> List[SearchHistoryEntry]:
+        """Return search history in reverse order (newest first)."""
+        return list(reversed(self.history))
 
     def add_recent_search(self, query: str):
         """Add to recent searches (max 10)."""
@@ -439,49 +474,11 @@ class SessionHistory:
         self.entries = []
 
 
-# ─── Pinned Cards ────────────────────────────────────────────────────────────
-
-class PinnedCards:
-    """Manages pinned cards for easy reference during a session."""
-
-    def __init__(self):
-        self.cards: List[Dict[str, Any]] = []
-
-    def pin(self, card_data: Dict[str, Any]):
-        """Add a card to pinned list (no duplicates)."""
-        # Check if already pinned by name
-        card_name = card_data.get("name", "Unknown")
-        if not any(c.get("name") == card_name for c in self.cards):
-            self.cards.append(card_data)
-
-    def unpin(self, card_name: str):
-        """Remove a card from pinned list."""
-        self.cards = [c for c in self.cards if c.get("name") != card_name]
-
-    def unpin_by_index(self, index: int):
-        """Remove a card by index."""
-        if 0 <= index < len(self.cards):
-            self.cards.pop(index)
-
-    def list(self) -> List[Dict[str, Any]]:
-        """Return list of pinned cards."""
-        return self.cards.copy()
-
-    def is_pinned(self, card_name: str) -> bool:
-        """Check if a card is pinned."""
-        return any(c.get("name") == card_name for c in self.cards)
-
-    def clear(self):
-        """Clear all pinned cards."""
-        self.cards = []
-
-
 # ─── Global Session State ────────────────────────────────────────────────────
 
 # These are initialized once at app start and persist across screens
 _current_breadcrumb = BreadcrumbPath("MTG Pipeline")
 _session_history = SessionHistory()
-_pinned_cards = PinnedCards()
 
 
 def get_breadcrumb() -> BreadcrumbPath:
@@ -498,8 +495,3 @@ def reset_breadcrumb():
 def get_session_history() -> SessionHistory:
     """Get the session history manager."""
     return _session_history
-
-
-def get_pinned_cards() -> PinnedCards:
-    """Get the pinned cards manager."""
-    return _pinned_cards

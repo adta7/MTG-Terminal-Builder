@@ -52,6 +52,7 @@ from rich import box
 from ui import SessionState, MenuItem, ask_choice_interactive
 from search_view import run_card_search_view
 from pinned_view import run_pinned_cards_view
+from history_view import run_history_view
 
 console = Console()
 
@@ -1662,6 +1663,7 @@ def main():
     main_menu_items = [
         MenuItem("search", "Search Cards", "Browse and search the card database"),
         MenuItem("pinned", "Pinned Cards", "View cards pinned this session"),
+        MenuItem("history", "Search History", "Re-run recent searches"),
         MenuItem("deck", "Deck Manager", "Create and manage decks"),
         MenuItem("lookup", "Card Lookup", "Look up individual cards"),
         MenuItem("pipeline", "Collection Enhancer", "Enrich spreadsheets with card data"),
@@ -1705,6 +1707,17 @@ def main():
         elif choice.key == "pinned":
             # Pinned Cards
             run_pinned_cards_view(session_state)
+            print()
+
+        elif choice.key == "history":
+            # Search History
+            try:
+                db = get_scryfall_db()
+                run_history_view(db, session_state)
+            except KeyboardInterrupt:
+                print("\n\nAborted.")
+            except Exception as e:
+                console.print(f"[red]Error: {e}[/red]")
             print()
 
         elif choice.key == "deck":

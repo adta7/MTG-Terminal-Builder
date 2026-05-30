@@ -16,20 +16,21 @@ from renderers import render_card_preview, render_dual_panel, render_single_pane
 def run_card_search_view(
     scryfall_db: Dict[str, Any],
     session_state: SessionState,
+    prefill_query: str = "",
 ) -> Optional[Dict[str, Any]]:
     """Run the interactive card search view.
 
     Users:
-    1. First get prompted to enter a search query
+    1. First get prompted to enter a search query (or use prefilled)
     2. Then navigate results with arrow keys
-    3. Press Enter to pin a card
-    4. Press p to toggle pin
-    5. Press / to search again
-    6. Press q or ESC to quit
+    3. Press p to toggle pin
+    4. Press / to search again
+    5. Press q or ESC to quit
 
     Args:
         scryfall_db: Scryfall card database
         session_state: Shared session state for pinned cards and recent searches
+        prefill_query: Optional pre-filled search query (e.g., from history replay)
 
     Returns:
         None (returns control to main menu)
@@ -43,7 +44,8 @@ def run_card_search_view(
         clear_screen()
         print(f"[dim cyan]{breadcrumb.render()}[/dim cyan]")
         print()
-        search_query = input("Search for card (or press Enter for nothing): ").strip()
+        prompt = f"Search for card [{prefill_query}]: " if prefill_query else "Search for card: "
+        search_query = input(prompt).strip() or prefill_query
 
         # Step 2: Execute search
         search_results: List[Dict[str, Any]] = []
@@ -52,6 +54,7 @@ def run_card_search_view(
         if search_query:
             session_state.add_recent_search(search_query)
             search_results = search_cards(search_query, scryfall_db, limit=50)
+            session_state.add_search_history(search_query, search_results)
 
         # Step 3: Interactive navigation loop
         while True:
@@ -86,7 +89,7 @@ def run_card_search_view(
                 # Dual-panel mode
                 # Add ★ marker for pinned cards
                 card_names = [
-                    f"★ {c.get('name', 'Unknown')}" if session_state.is_pinned(c.get("name", "Unknown")) else c.get("name", "Unknown")
+                    f"★ {c.get('name', 'Unknown')}" if session_state.is_pinned(c) else c.get("name", "Unknown")
                     for c in search_results
                 ]
 
@@ -115,7 +118,7 @@ def run_card_search_view(
                 # Single-panel fallback for narrow terminals
                 # Add ★ marker for pinned cards
                 card_names = [
-                    f"★ {c.get('name', 'Unknown')}" if session_state.is_pinned(c.get("name", "Unknown")) else c.get("name", "Unknown")
+                    f"★ {c.get('name', 'Unknown')}" if session_state.is_pinned(c) else c.get("name", "Unknown")
                     for c in search_results
                 ]
                 status_line = "↑↓ navigate · p pin · / search · q quit"
@@ -146,11 +149,11 @@ def run_card_search_view(
                 # Toggle pin on selected card
                 if search_results and selected_index < len(search_results):
                     selected_card = search_results[selected_index]
-                    card_name = selected_card.get("name", "Unknown")
-                    if session_state.is_pinned(card_name):
-                        session_state.unpin_card(card_name)
+                    if session_state.is_pinned(selected_card):
+                        key = selected_card.get("id") or selected_card.get("oracle_id") or selected_card.get("name", "Unknown")
+                        session_state.unpin_card(key)
                     else:
-                        session_state.pin_card(card_name)
+                        session_state.pin_card(selected_card)
 
             elif key == '/':
                 # Start a new search
@@ -158,6 +161,7 @@ def run_card_search_view(
                 if search_query:
                     session_state.add_recent_search(search_query)
                     search_results = search_cards(search_query, scryfall_db, limit=50)
+                    session_state.add_search_history(search_query, search_results)
                     selected_index = 0
                 else:
                     search_results = []
