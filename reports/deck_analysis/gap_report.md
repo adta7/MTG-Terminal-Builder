@@ -44,15 +44,15 @@ Reasons:
 | Mana_Acceleration | 16 | 3 | 11.2 | 11–14 | 8.0–12.0 | SLIGHTLY HIGH | W_OK |
 | Card_Draw | 14 | 5 | 10.9 | 9–12 | 7.0–11.0 | SLIGHTLY HIGH | W_OK |
 | Mana_Engine | 7 | 4 | 6.0 | 2–4 | 2.0–5.0 | HIGH | W_SLIGHTLY_HIGH |
-| Removal | 15 | 7 | 11.9 | 9–12 | 8.0–12.0 | HIGH | W_OK |
-| Engine | 28 | 6 | 18.2 | 10–16 | 8.0–14.0 | HIGH | W_HIGH |
-| Payoff | 20 | 4 | 14.4 | 6–10 | 5.0–9.0 | HIGH | W_HIGH |
-| Fuel | 15 | 0 | 8.0 | 5–8 | 4.0–7.0 | HIGH | W_SLIGHTLY_HIGH |
+| Removal | 15 | 11 | 13.3 | 9–12 | 8.0–12.0 | HIGH | W_SLIGHTLY_HIGH |
+| Engine | 28 | 9 | 19.2 | 10–16 | 8.0–14.0 | HIGH | W_HIGH |
+| Payoff | 20 | 5 | 14.8 | 6–10 | 5.0–9.0 | HIGH | W_HIGH |
+| Fuel | 15 | 3 | 9.3 | 5–8 | 4.0–7.0 | HIGH | W_HIGH |
 | Recursion | 16 | 14 | 15.3 | 6–9 | 6.0–10.0 | HIGH | W_HIGH |
 | Conversion | 20 | 5 | 12.3 | 5–8 | 4.0–7.0 | HIGH | W_HIGH |
-| Enabler | 32 | 1 | 21.1 | 7–12 | 5.5–10.0 | HIGH | W_HIGH |
-| Interaction | 14 | 5 | 10.9 | 6–9 | 5.0–8.0 | HIGH | W_HIGH |
-| Threat | 16 | 1 | 10.8 | 6–10 | 5.0–9.0 | HIGH | W_SLIGHTLY_HIGH |
+| Enabler | 32 | 2 | 21.5 | 7–12 | 5.5–10.0 | HIGH | W_HIGH |
+| Interaction | 14 | 9 | 12.2 | 6–9 | 5.0–8.0 | HIGH | W_HIGH |
+| Threat | 16 | 3 | 11.5 | 6–10 | 5.0–9.0 | HIGH | W_HIGH |
 
 ---
 
@@ -94,13 +94,13 @@ Logic: CMC 6+ and at least one over-represented role.
 
 | Card | CMC | Over-represented roles |
 |------|-----|------------------------|
-| Archon of Cruelty | 8 | Removal, Engine, Interaction, Threat, Payoff, Card_Draw |
-| Butcher of Malakir | 7 | Interaction, Removal, Engine, Threat |
-| Overseer of the Damned | 7 | Interaction, Removal |
+| Archon of Cruelty | 8 | Payoff, Interaction, Card_Draw, Threat, Removal, Engine |
+| Butcher of Malakir | 7 | Threat, Removal, Interaction, Engine |
+| Overseer of the Damned | 7 | Removal, Interaction |
 | Rune-Scarred Demon | 7 | Enabler |
-| Sheoldred, Whispering One | 7 | Removal, Engine, Enabler, Interaction, Threat, Recursion |
-| Grave Titan | 6 | Threat, Payoff, Fuel |
-| Nirkana Revenant | 6 | Mana_Acceleration, Mana_Engine |
+| Sheoldred, Whispering One | 7 | Enabler, Recursion, Interaction, Threat, Removal, Engine |
+| Grave Titan | 6 | Fuel, Payoff, Threat |
+| Nirkana Revenant | 6 | Mana_Engine, Mana_Acceleration |
 
 ### C. Parser Blind Spots
 

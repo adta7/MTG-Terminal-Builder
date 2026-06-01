@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-deck_gap_analysis.py — Phase 6C: Role Weighting + Primary Role Classification
+deck_gap_analysis.py — Phase 6E: Primary Role Correction / Archetype Role Overrides
 
 Answers:
   6B: "Is this deck structurally playable before I evaluate card quality?"
   6C: "How important is each role on each card — primary, secondary, or incidental?"
+  6D: "How do weighted targets compare to raw counts? What's the completion plan?"
+  6E: "Are archetype-core cards correctly classified as primary role holders?"
 
 Produces:
   reports/deck_analysis/gap_report.md             — full diagnostic report
@@ -150,6 +152,63 @@ MANUAL_ROLE_WEIGHTS: dict[str, dict[str, dict]] = {
         "Engine":         {"priority": "secondary",  "weight": SECONDARY_WEIGHT},
         "Conversion":     {"priority": "incidental", "weight": INCIDENTAL_WEIGHT},
     },
+}
+
+# ── Primary role overrides (Phase 6E) ────────────────────────────────────────
+# For cards where the rule-engine confidence is correct (the role IS present),
+# but the confidence value clusters at 0.80-0.85 — just below the 0.88 primary
+# threshold — even though in this archetype the role IS primary.
+#
+# MANUAL_ROLE_WEIGHTS handles cases where the auto-classification is *wrong*
+# (e.g., Archon of Cruelty where Threat should be primary but isn't).
+# PRIMARY_ROLE_OVERRIDES handles archetype-specific promotion: the role is real,
+# the deck cares about it primarily, and the threshold fails to capture that.
+#
+# Rule: only promote roles the card already has (from the rule engine).
+# Do not add new roles here — that bypasses honest gap tracking.
+#
+# Archetype context: mono-black recursive midrange aristocrats.
+#   - death triggers = primary engine
+#   - forced sacrifice effects = primary removal / interaction
+#   - death → token = primary fuel
+#   - free sacrifice outlets = primary enabler
+PRIMARY_ROLE_OVERRIDES: dict[str, list[str]] = {
+    # Engine/control pillar — every opponent creature death forces a sacrifice.
+    # This is what makes the aristocrats plan oppressive, not just value-generating.
+    "Grave Pact":         ["Engine", "Removal", "Interaction"],
+    "Butcher of Malakir": ["Engine", "Removal", "Interaction", "Threat"],
+
+    # Death → Treasure. With constant creature deaths this is a primary mana engine.
+    "Pitiless Plunderer": ["Engine", "Payoff", "Fuel"],
+
+    # 6/6 deathtouch + immediate Zombie tokens. Primary threat that doubles as fuel.
+    "Grave Titan":        ["Threat", "Fuel"],
+
+    # Death → Zombie token. Pure primary fuel in a deck built on creature deaths.
+    "Ghoulish Procession": ["Fuel"],
+
+    # ETB forced sacrifice = primary removal spell. Brings value via discard too.
+    "Plaguecrafter":      ["Removal", "Interaction"],
+
+    # Smaller Plaguecrafter analogue — ETB forced sacrifice is primary removal.
+    "Accursed Marauder":  ["Removal", "Interaction"],
+
+    # Free sacrifice outlet — in aristocrats, Enabler is the PRIMARY function.
+    "Woe Strider":        ["Enabler"],
+}
+
+# ── Primary role validation (Phase 6E) ───────────────────────────────────────
+# Cards that must NOT appear in Tier 1 cut pressure after overrides are applied.
+# A failure here means PRIMARY_ROLE_OVERRIDES is incomplete or wrong.
+PRIMARY_ROLE_VALIDATION: dict[str, str] = {
+    "Grave Pact":         "Primary engine/control pillar in aristocrats",
+    "Pitiless Plunderer": "Core engine/conversion — death → Treasure is primary",
+    "Grave Titan":        "Primary threat + fuel generator",
+    "Butcher of Malakir": "Primary threat/oppression — flying 5/4 + forced sac",
+    "Ghoulish Procession":"Primary fuel — death → token is its entire purpose",
+    "Plaguecrafter":      "Primary removal — ETB forced sacrifice",
+    "Accursed Marauder":  "Primary removal — ETB forced sacrifice",
+    "Woe Strider":        "Primary enabler — free sacrifice outlet",
 }
 
 PRIORITY_GAPS = [
@@ -379,11 +438,17 @@ def compute_weighted_roles(card_name: str, db) -> dict[str, dict]:
             priority, weight = "incidental", INCIDENTAL_WEIGHT
         result[role] = {"priority": priority, "weight": weight, "confidence": conf}
 
-    # Apply manual overrides — only for roles the rule engine already derived.
-    # We never ADD roles here; that would bypass the honest gap-tracking.
+    # Apply manual weight overrides — only for roles the rule engine already derived.
     for role, override in MANUAL_ROLE_WEIGHTS.get(card_name, {}).items():
         if role in result:
             result[role].update(override)
+
+    # Apply archetype-specific primary role promotions.
+    # Promotes existing roles to primary without changing other attributes.
+    for role in PRIMARY_ROLE_OVERRIDES.get(card_name, []):
+        if role in result:
+            result[role]["priority"] = "primary"
+            result[role]["weight"]   = PRIMARY_WEIGHT
 
     return result
 
@@ -574,7 +639,7 @@ def run_analysis(deck_path: str, db_path: str) -> None:
     print(f"\n{'='*60}")
     print(f"  DECK GAP ANALYSIS — {deck_name.upper()}")
     print(f"  Commander: {commander}")
-    print(f"  Phase 6D: Weighted Targets + Deck Completion Planner")
+    print(f"  Phase 6E: Primary Role Correction / Archetype Role Overrides")
     print(f"{'='*60}")
 
     db = Database(db_path)
@@ -798,7 +863,7 @@ def run_analysis(deck_path: str, db_path: str) -> None:
 
     # ── Completion planner ────────────────────────────────────────────────────
     print(f"\n{'─'*60}")
-    print("COMPLETION PLANNER (Phase 6D)")
+    print("COMPLETION PLANNER (Phase 6E — archetype-aware)")
     print(f"{'─'*60}")
     print(f"  Add {structural['lands_needed']} lands.  Cut {structural['nonland_cuts_needed']} nonlands.")
     print()
@@ -820,6 +885,27 @@ def run_analysis(deck_path: str, db_path: str) -> None:
     for item in cut_tier3:
         print(f"    [{item['reason']}]  {item['name']}")
 
+    # ── Primary role validation (Phase 6E) ───────────────────────────────────
+    tier1_names = {item["name"].lower() for item in cut_tier1}
+    print(f"\n{'─'*60}")
+    print("PRIMARY ROLE VALIDATION (Phase 6E)")
+    print(f"{'─'*60}")
+    print("  Checks that archetype-core cards are NOT in Tier 1 cut pressure.")
+    all_pass = True
+    for card_name, reason in PRIMARY_ROLE_VALIDATION.items():
+        wr = weighted_by_card.get(card_name, {})
+        primary_roles = [r for r, v in wr.items() if v["priority"] == "primary"]
+        in_tier1 = card_name.lower() in tier1_names
+        if in_tier1 or not primary_roles:
+            print(f"  ✗ {card_name:<35}  NO primary roles — still misclassified")
+            all_pass = False
+        else:
+            print(f"  ✓ {card_name:<35}  primary: {', '.join(sorted(primary_roles))}")
+    if all_pass:
+        print("\n  All validation checks passed. Cut tiers are archetype-aware.")
+    else:
+        print("\n  ⚠ Some cards still misclassified. Expand PRIMARY_ROLE_OVERRIDES.")
+
     # ── Write reports ─────────────────────────────────────────────────────────
     _write_structural_json(structural)
     _write_blindspots_csv()
@@ -834,7 +920,7 @@ def run_analysis(deck_path: str, db_path: str) -> None:
     _write_weighted_summary_csv(deck_infos, weighted_by_card)
     _write_weighted_role_targets_csv(role_breakdown)
     _write_primary_role_summary_csv(role_breakdown)
-    _write_completion_plan_md(structural, cut_tier1, cut_tier2, cut_tier3, role_breakdown)
+    _write_completion_plan_md(structural, cut_tier1, cut_tier2, cut_tier3, role_breakdown, all_pass)
 
     print(f"\n{'─'*60}")
     print("REPORTS WRITTEN")
@@ -1129,6 +1215,7 @@ def _write_completion_plan_md(
     structural: dict,
     tier1: list, tier2: list, tier3: list,
     role_breakdown: dict,
+    validation_passed: bool = False,
 ) -> None:
     """
     Write a deck completion plan: how many lands to add, which nonlands are
@@ -1137,9 +1224,25 @@ def _write_completion_plan_md(
     lands_needed = structural["lands_needed"]
     cuts_needed  = structural["nonland_cuts_needed"]
 
+    if validation_passed:
+        status_block = [
+            "> **Status:** Cut tiers are archetype-aware.",
+            "> Primary role validation passed — all archetype-core cards have primary roles.",
+            "",
+        ]
+    else:
+        status_block = [
+            "> ⚠ **WARNING: Cut tiers are experimental.**",
+            "> Cards with 0 primary roles may indicate missing primary-role classification,",
+            "> not true cut safety. Do not make final cuts from this list until",
+            "> primary-role validation passes (run `PRIMARY_ROLE_VALIDATION` checks).",
+            "",
+        ]
+
     lines = [
         "# Deck Completion Plan",
         "",
+        *status_block,
         "## Structural Gap",
         "",
         f"| Metric | Current | Target |",

@@ -1,5 +1,8 @@
 # Deck Completion Plan
 
+> **Status:** Cut tiers are archetype-aware.
+> Primary role validation passed — all archetype-core cards have primary roles.
+
 ## Structural Gap
 
 | Metric | Current | Target |
@@ -19,10 +22,8 @@ The deck currently has no primary-role gaps. After cutting ~13 nonlands:
 
 Roles with low primary coverage — protect these:
 
-- **Fuel**: 0 primary cards (weighted 8.0 — target 4.0–7.0)
-- **Enabler**: 1 primary cards (weighted 21.1 — target 5.5–10.0)
-- **Threat**: 1 primary cards (weighted 10.8 — target 5.0–9.0)
 - **Finisher**: 2 primary cards (weighted 3.9 — target 3.0–6.0)
+- **Enabler**: 2 primary cards (weighted 21.5 — target 5.5–10.0)
 - **Protection**: 2 primary cards (weighted 2.0 — target 2.0–4.0)
 
 ---
@@ -39,14 +40,6 @@ The deck absorbs these cuts with minimal role impact.
 
 | Card | CMC | Functional density | Cut pressure |
 |------|-----|--------------------|--------------|
-| Butcher of Malakir | 7 | 2.60 | 6.2 |
-| Grave Titan | 6 | 1.65 | 3.6 |
-| Grave Pact | 4 | 2.60 | 2.2 |
-| Plaguecrafter | 3 | 2.60 | 2.2 |
-| Woe Strider | 3 | 2.95 | 2.2 |
-| Accursed Marauder | 2 | 2.60 | 2.2 |
-| Pitiless Plunderer | 4 | 2.30 | 1.9 |
-| Ghoulish Procession | 2 | 2.30 | 1.9 |
 | Mind Stone | 2 | 1.95 | 1.9 |
 | Plumb the Forbidden | 2 | 2.30 | 1.9 |
 | Drivnod, Carnage Dominus | 5 | 1.30 | 1.6 |
