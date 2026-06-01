@@ -9,6 +9,7 @@ Answers:
   6E: "Are archetype-core cards correctly classified as primary role holders?"
   6F: "What does cutting each card cost the deck? (cut_cost / role scarcity / curve)"
   6G: "Cut verdict bands — strong / borderline / near-zero / needs_role_review"
+  7:  "Deck completion simulation — structural path to 100 cards"
 
 Produces:
   reports/deck_analysis/gap_report.md             — full diagnostic report
@@ -534,6 +535,23 @@ def weighted_gap_status(weighted_total: float, targets: tuple[float, float]) -> 
     return "W_OK"
 
 
+def model_confidence(net: float, verdict: str, primary_count: int) -> str:
+    """
+    How confident the model is in a cut recommendation.
+
+      high   — net >= 1.0, 0 primary roles, not flagged for role review
+      medium — net >= 0.25, or Tier 2 card with clear structural pressure
+      low    — near-zero net, needs_role_review, or Tier 2 with high primary density
+    """
+    if verdict == CUT_VERDICT_ROLE_REVIEW:
+        return "low"
+    if net >= 1.0 and primary_count == 0:
+        return "high"
+    if net >= 0.25:
+        return "medium"
+    return "low"
+
+
 def cut_verdict(net: float, primary_count: int, fds: float) -> str:
     """
     Assign a cut verdict band to a card.
@@ -665,19 +683,23 @@ def compute_cut_pressure(
                 # Weight the penalty by how much this card contributes to the role
                 cut_cost += scarcity * info["weight"]
 
-        net     = pressure - cut_cost
-        verdict = cut_verdict(net, primary_count, fds)
+        net        = pressure - cut_cost
+        verdict    = cut_verdict(net, primary_count, fds)
+        confidence = model_confidence(net, verdict, primary_count)
 
         entry = {
             "name": c["name"], "cmc": c["cmc"],
             "primary": primary_count, "secondary": secondary_count,
             "fds": fds, "pressure": pressure, "cut_cost": cut_cost,
-            "net": net, "verdict": verdict,
+            "net": net, "verdict": verdict, "confidence": confidence,
         }
         if primary_count == 0 and net > 0:
             tier1.append(entry)
         elif primary_count > 0 and net > 0 and c["cmc"] >= 5:
-            tier2.append(entry)
+            # Tier 2 confidence: structural pressure drives the recommendation,
+            # but primary roles make it costlier. Net > 4 = medium; lower = low.
+            t2_confidence = "medium" if net >= 4.0 else "low"
+            tier2.append({**entry, "confidence": t2_confidence})
 
     tier1.sort(key=lambda x: (-x["net"], -x["cmc"]))
     tier2.sort(key=lambda x: (-x["net"], -x["cmc"]))
@@ -734,7 +756,7 @@ def run_analysis(deck_path: str, db_path: str) -> None:
     print(f"\n{'='*60}")
     print(f"  DECK GAP ANALYSIS — {deck_name.upper()}")
     print(f"  Commander: {commander}")
-    print(f"  Phase 6G: Cut Verdict Bands + Final Role Corrections")
+    print(f"  Phase 7: Deck Completion Simulation")
     print(f"{'='*60}")
 
     db = Database(db_path)
@@ -1033,6 +1055,9 @@ def run_analysis(deck_path: str, db_path: str) -> None:
     _write_weighted_role_targets_csv(role_breakdown)
     _write_primary_role_summary_csv(role_breakdown)
     _write_completion_plan_md(structural, cut_tier1, cut_tier2, cut_tier3, role_breakdown, all_pass)
+    _write_deck_completion_simulation_md(
+        structural, cut_tier1, cut_tier2, cut_tier3, weighted_by_card, role_breakdown
+    )
 
     print(f"\n{'─'*60}")
     print("REPORTS WRITTEN")
@@ -1276,6 +1301,233 @@ def _write_weighted_summary_csv(deck_infos: list, weighted_by_card: dict) -> Non
                 f"{score:.2f}",
                 len(c["func"]),
             ])
+
+
+def _write_deck_completion_simulation_md(
+    structural: dict,
+    tier1: list, tier2: list, tier3: list,
+    weighted_by_card: dict,
+    role_breakdown: dict,
+) -> None:
+    """
+    Structural path from the current 87-card incomplete deck to a complete 100-card deck.
+
+    The simulation shows what the model IS confident about, what it is uncertain about,
+    and where human judgment is required. It is not a final decklist.
+    """
+    cuts_needed   = structural["nonland_cuts_needed"]
+    lands_needed  = structural["lands_needed"]
+
+    # Split tier1 into verdict bands for the simulation
+    strong     = [c for c in tier1 if c["verdict"] == CUT_VERDICT_STRONG]
+    borderline = [c for c in tier1 if c["verdict"] == CUT_VERDICT_BORDERLINE]
+    near_zero  = [c for c in tier1 if c["verdict"] == CUT_VERDICT_NEAR_ZERO]
+    role_review = [c for c in tier1 if c["verdict"] == CUT_VERDICT_ROLE_REVIEW]
+
+    confident_cuts    = len(strong)
+    borderline_cuts   = len(borderline)
+    human_needed      = cuts_needed - confident_cuts  # minimum human decision cuts
+    human_if_border   = cuts_needed - confident_cuts - borderline_cuts
+
+    lines = [
+        "# Deck Completion Simulation",
+        "",
+        "> **This is a structural path to completion, not a final decklist.**",
+        "> The model shows where it is confident, where it is uncertain, and where",
+        "> human judgment is required before any card is removed.",
+        "",
+        "---",
+        "",
+        "## Starting State",
+        "",
+        f"| Metric | Current | Target |",
+        f"|--------|---------|--------|",
+        f"| Total cards | {structural['deck_size']} | {structural['deck_size_target']} |",
+        f"| Lands | {structural['land_count']} | {structural['land_target_min']}–{structural['land_target_max']} |",
+        f"| Nonlands | {structural['nonland_count']} | ~{structural['deck_size_target'] - structural['land_target_min']} |",
+        "",
+        "---",
+        "",
+        "## What Needs to Happen",
+        "",
+        f"1. Cut **{cuts_needed} nonlands** to open land slots.",
+        f"2. Add **{lands_needed} lands** to reach a functional mana base.",
+        f"3. (Optional) Fill remaining card slots from collection, if any remain after cuts.",
+        "",
+        "---",
+        "",
+        "## Cut Path (model confidence breakdown)",
+        "",
+        f"Total cuts needed: **{cuts_needed}**",
+        "",
+    ]
+
+    # Phase 1: strong cuts
+    lines += [
+        f"### Phase 1 — Model-confident cuts ({confident_cuts} of {cuts_needed})",
+        "",
+        "The model is **high-confidence** on these. No primary roles. Clear structural pressure.",
+        "Cutting these first is the lowest-risk path.",
+        "",
+    ]
+    if strong:
+        lines.append("| Card | CMC | Net score | Model confidence |")
+        lines.append("|------|-----|-----------|-----------------|")
+        for item in strong:
+            lines.append(
+                f"| {item['name']} | {item['cmc']} "
+                f"| {item['net']:.2f} | {item['confidence']} |"
+            )
+    else:
+        lines.append("None. (No strong cut candidates — proceed directly to Phase 2.)")
+
+    remaining_after_1 = cuts_needed - confident_cuts
+    lines += [
+        "",
+        f"Cuts freed: **{confident_cuts}**.  Remaining: **{remaining_after_1}**.",
+        "",
+    ]
+
+    # Phase 2: borderline cuts (optional)
+    lines += [
+        f"### Phase 2 — Borderline cuts ({borderline_cuts} available, use if needed)",
+        "",
+        "The model is **medium-confidence** on these. No primary roles, but some curve or",
+        "scarcity cost. Consider cutting these if Phase 1 alone is not enough.",
+        "",
+    ]
+    if borderline:
+        lines.append("| Card | CMC | Net score | Model confidence | Caution |")
+        lines.append("|------|-----|-----------|-----------------|---------|")
+        for item in borderline:
+            caution = "Has secondary Card_Draw — check draw count after cut." if "Card_Draw" in {
+                r for r, v in weighted_by_card.get(item["name"], {}).items()
+            } else "—"
+            lines.append(
+                f"| {item['name']} | {item['cmc']} "
+                f"| {item['net']:.2f} | {item['confidence']} | {caution} |"
+            )
+    else:
+        lines.append("None.")
+
+    remaining_after_2 = max(0, remaining_after_1 - borderline_cuts)
+    lines += [
+        "",
+        f"If all Phase 2 cuts are made: freed {confident_cuts + borderline_cuts}. "
+        f"Remaining: **{remaining_after_2}**.",
+        "",
+    ]
+
+    # Phase 3: near-zero review
+    lines += [
+        f"### Phase 3 — Near-zero review (do NOT cut without explicit decision)",
+        "",
+        "Net score is nearly zero — the model has almost no preference.",
+        "These should only be cut after evaluating whether their role is covered elsewhere.",
+        "",
+    ]
+    if near_zero:
+        lines.append("| Card | CMC | Net score | Model confidence |")
+        lines.append("|------|-----|-----------|-----------------|")
+        for item in near_zero:
+            lines.append(
+                f"| {item['name']} | {item['cmc']} "
+                f"| {item['net']:.2f} | {item['confidence']} |"
+            )
+    else:
+        lines.append("None.")
+    lines.append("")
+
+    # Phase 4: role review cards
+    if role_review:
+        lines += [
+            "### Phase 3D — Needs role review (halt before cutting)",
+            "",
+            "These cards have 0 primary roles but high functional density.",
+            "The model may be misclassifying them. Resolve primary-role status before cutting.",
+            "",
+            "| Card | CMC | FDS | Net score |",
+            "|------|-----|-----|-----------|",
+        ]
+        for item in role_review:
+            lines.append(
+                f"| {item['name']} | {item['cmc']} "
+                f"| {item['fds']:.2f} | {item['net']:.2f} |"
+            )
+        lines.append("")
+
+    # Phase 5: human-required Tier 2 cuts
+    if remaining_after_2 > 0:
+        lines += [
+            f"### Phase 4 — Human-required cuts ({remaining_after_2} still needed)",
+            "",
+            "After Phases 1–2, the model cannot confidently suggest the remaining cuts.",
+            "These must come from **Tier 2** (cards with primary roles, CMC ≥ 5).",
+            "Each cut removes primary-role coverage. Evaluate impact before deciding.",
+            "",
+        ]
+        if tier2:
+            lines.append("| Card | CMC | Primary roles | Net score | Model confidence | Impact |")
+            lines.append("|------|-----|---------------|-----------|-----------------|--------|")
+            for item in tier2[:10]:
+                wr = weighted_by_card.get(item["name"], {})
+                primary_roles = sorted(r for r, v in wr.items() if v["priority"] == "primary")
+                impact = ", ".join(primary_roles)
+                lines.append(
+                    f"| {item['name']} | {item['cmc']} "
+                    f"| {len(primary_roles)} | {item['net']:.2f} | {item['confidence']} "
+                    f"| loses: {impact or '—'} |"
+                )
+        lines.append("")
+
+    # Protected cards summary
+    lines += [
+        "---",
+        "",
+        "## Cards Not Under Consideration",
+        "",
+        "These cards are protected from the cut model and require explicit human approval.",
+        "",
+        "| Card | Reason |",
+        "|------|--------|",
+    ]
+    for item in tier3:
+        lines.append(f"| {item['name']} | {item['reason']} |")
+
+    # Land additions
+    lines += [
+        "",
+        "---",
+        "",
+        "## Land Addition Summary",
+        "",
+        f"After making the cuts above, add **{lands_needed} lands**.",
+        "The model does not select specific lands — that is the player's decision.",
+        "Suggested composition (for reference only):",
+        "",
+        "- 15–18 basic Swamps (reliable, no setup required)",
+        "- Cabal Coffers + Urborg, Tomb of Yawgmoth (if not already in list)",
+        "- 4–6 utility lands: Phyrexian Tower, Cabal Stronghold, Nykthos, Castle Locthwain",
+        "- 3–4 fetch/graveyard-synergy lands",
+        "",
+        "> The player should finalize the land package based on collection, budget, and play style.",
+        "",
+        "---",
+        "",
+        "## Summary",
+        "",
+        f"| Stage | Cards | Model confidence |",
+        f"|-------|-------|-----------------|",
+        f"| Phase 1 — strong cuts | {confident_cuts} | high |",
+        f"| Phase 2 — borderline cuts | {borderline_cuts} | medium |",
+        f"| Phase 3 — near-zero review | {len(near_zero)} | low (human decision) |",
+        f"| Phase 3D — needs role review | {len(role_review)} | low (halt before cutting) |",
+        f"| Phase 4 — Tier 2 (primary-role cuts) | {remaining_after_2} | low (human required) |",
+        f"| **Total cuts needed** | **{cuts_needed}** | — |",
+        f"| **Lands to add** | **{lands_needed}** | player decision |",
+    ]
+
+    (REPORTS / "deck_completion_simulation.md").write_text("\n".join(lines))
 
 
 def _write_weighted_role_targets_csv(role_breakdown: dict) -> None:
