@@ -1,0 +1,12 @@
+{
+  "complete_confident_path_available": false,
+  "confident_cuts_available": 3,
+  "high_confidence_cuts": 2,
+  "medium_confidence_cuts": 1,
+  "human_required_cuts": 10,
+  "near_zero_review_count": 2,
+  "needs_role_review_count": 1,
+  "total_cuts_needed": 13,
+  "lands_to_add": 26,
+  "warning": "This model cannot complete the final deck without player preference input. Only 3 of 13 needed cuts can be suggested with medium-or-higher confidence. The remaining 10 require explicit human decisions about which primary roles to reduce."
+}

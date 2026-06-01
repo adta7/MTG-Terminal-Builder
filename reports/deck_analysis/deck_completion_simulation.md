@@ -3,6 +3,9 @@
 > **This is a structural path to completion, not a final decklist.**
 > The model shows where it is confident, where it is uncertain, and where
 > human judgment is required before any card is removed.
+>
+> **Model limit:** This model can suggest 3 of 13 needed cuts with medium-or-higher confidence.
+> The remaining 10 cuts require player preference input.
 
 ---
 

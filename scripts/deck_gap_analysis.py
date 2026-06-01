@@ -1335,6 +1335,11 @@ def _write_deck_completion_simulation_md(
         "> **This is a structural path to completion, not a final decklist.**",
         "> The model shows where it is confident, where it is uncertain, and where",
         "> human judgment is required before any card is removed.",
+        ">",
+        f"> **Model limit:** This model can suggest {confident_cuts + borderline_cuts} of "
+        f"{cuts_needed} needed cuts with medium-or-higher confidence.",
+        f"> The remaining {cuts_needed - confident_cuts - borderline_cuts} cuts require "
+        f"player preference input.",
         "",
         "---",
         "",
@@ -1527,6 +1532,28 @@ def _write_deck_completion_simulation_md(
         f"| **Lands to add** | **{lands_needed}** | player decision |",
     ]
 
+    # Add machine-readable simulation status header
+    simulation_status = {
+        "complete_confident_path_available": False,
+        "confident_cuts_available": confident_cuts + borderline_cuts,
+        "high_confidence_cuts": confident_cuts,
+        "medium_confidence_cuts": borderline_cuts,
+        "human_required_cuts": remaining_after_2,
+        "near_zero_review_count": len(near_zero),
+        "needs_role_review_count": len(role_review),
+        "total_cuts_needed": cuts_needed,
+        "lands_to_add": lands_needed,
+        "warning": (
+            "This model cannot complete the final deck without player preference input. "
+            f"Only {confident_cuts + borderline_cuts} of {cuts_needed} needed cuts can be "
+            "suggested with medium-or-higher confidence. The remaining "
+            f"{remaining_after_2} require explicit human decisions about which primary roles "
+            "to reduce."
+        ),
+    }
+    (REPORTS / "deck_completion_simulation.json").write_text(
+        json.dumps(simulation_status, indent=2)
+    )
     (REPORTS / "deck_completion_simulation.md").write_text("\n".join(lines))
 
 
