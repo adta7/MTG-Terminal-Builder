@@ -8,6 +8,7 @@ Answers:
   6D: "How do weighted targets compare to raw counts? What's the completion plan?"
   6E: "Are archetype-core cards correctly classified as primary role holders?"
   6F: "What does cutting each card cost the deck? (cut_cost / role scarcity / curve)"
+  6G: "Cut verdict bands — strong / borderline / near-zero / needs_role_review"
 
 Produces:
   reports/deck_analysis/gap_report.md             — full diagnostic report
@@ -207,6 +208,11 @@ PRIMARY_ROLE_OVERRIDES: dict[str, list[str]] = {
     "Deadly Dispute":     ["Card_Draw"],
     "Plumb the Forbidden":["Card_Draw", "Conversion"],
     "Disciple of Bolas":  ["Card_Draw"],
+
+    # Aristocrats payoff: pings each opponent on any death/graveyard event.
+    # The functional rule (Death_Trigger + Damage_Effect → Payoff 0.85) gives Payoff,
+    # but at secondary confidence. Promote to primary — he IS the payoff card.
+    "Syr Konrad, the Grim": ["Payoff"],
 }
 
 # ── Cut cost constants (Phase 6F) ────────────────────────────────────────────
@@ -228,6 +234,23 @@ SCARCITY_PENALTY: dict[str, float] = {
     "W_HIGH":          0.0,   # well over-target — removing is encouraged
 }
 
+# ── Cut verdict bands (Phase 6G) ──────────────────────────────────────────────
+# Do not present all positive-net cards as equally safe cuts.
+# Bands reflect confidence in the cut recommendation.
+CUT_VERDICT_STRONG     = "strong_cut_candidate"   # net >= 1.0
+CUT_VERDICT_BORDERLINE = "borderline_cut_candidate" # 0.25 <= net < 1.0
+CUT_VERDICT_NEAR_ZERO  = "near_zero_review"        # 0 < net < 0.25
+CUT_VERDICT_ROLE_REVIEW = "needs_role_review"      # 0 primary roles but fds > 1.0 — may be misclassified
+CUT_VERDICT_SKIP       = "do_not_cut_by_model"     # net <= 0
+
+# FDS threshold above which a 0-primary card is suspicious enough to flag for role review
+# rather than being presented as a safe cut.
+# 1.0 caught too many false positives (pure draw spells like Read the Bones have FDS 1.30
+# from Card_Draw + Card_Advantage — both are essentially the same function).
+# 1.5 targets genuinely ambiguous cards: Mind Stone (1.95, mana rock or draw?),
+# Abnormal Endurance (1.55, protection or fuel?).
+ROLE_REVIEW_FDS_THRESHOLD = 1.5
+
 # ── Primary role validation (Phase 6E) ───────────────────────────────────────
 # Cards that must NOT appear in Tier 1 cut pressure after overrides are applied.
 # A failure here means PRIMARY_ROLE_OVERRIDES is incomplete or wrong.
@@ -245,6 +268,7 @@ PRIMARY_ROLE_VALIDATION: dict[str, str] = {
     "Deadly Dispute":     "Primary card draw — instant-speed draw 2 with sacrifice cost",
     "Plumb the Forbidden":"Primary card draw + conversion — sacrifice X to draw X at instant speed",
     "Disciple of Bolas":  "Primary card draw — ETB sacrifice to draw X",
+    "Syr Konrad, the Grim": "Primary payoff — pings each opponent on every creature death/graveyard event",
 }
 
 PRIORITY_GAPS = [
@@ -510,6 +534,25 @@ def weighted_gap_status(weighted_total: float, targets: tuple[float, float]) -> 
     return "W_OK"
 
 
+def cut_verdict(net: float, primary_count: int, fds: float) -> str:
+    """
+    Assign a cut verdict band to a card.
+
+    needs_role_review takes priority over net-based bands: if a card has 0 primary
+    roles but high FDS, the system may be misclassifying it — do not present it as a
+    safe cut until the role review is resolved.
+    """
+    if primary_count == 0 and fds > ROLE_REVIEW_FDS_THRESHOLD:
+        return CUT_VERDICT_ROLE_REVIEW
+    if net >= 1.0:
+        return CUT_VERDICT_STRONG
+    if net >= 0.25:
+        return CUT_VERDICT_BORDERLINE
+    if net > 0:
+        return CUT_VERDICT_NEAR_ZERO
+    return CUT_VERDICT_SKIP
+
+
 def compute_role_priority_breakdown(
     deck_infos: list,
     weighted_by_card: dict,
@@ -622,12 +665,14 @@ def compute_cut_pressure(
                 # Weight the penalty by how much this card contributes to the role
                 cut_cost += scarcity * info["weight"]
 
-        net = pressure - cut_cost
+        net     = pressure - cut_cost
+        verdict = cut_verdict(net, primary_count, fds)
 
         entry = {
             "name": c["name"], "cmc": c["cmc"],
             "primary": primary_count, "secondary": secondary_count,
-            "fds": fds, "pressure": pressure, "cut_cost": cut_cost, "net": net,
+            "fds": fds, "pressure": pressure, "cut_cost": cut_cost,
+            "net": net, "verdict": verdict,
         }
         if primary_count == 0 and net > 0:
             tier1.append(entry)
@@ -689,7 +734,7 @@ def run_analysis(deck_path: str, db_path: str) -> None:
     print(f"\n{'='*60}")
     print(f"  DECK GAP ANALYSIS — {deck_name.upper()}")
     print(f"  Commander: {commander}")
-    print(f"  Phase 6F: Cut Cost / Role Scarcity")
+    print(f"  Phase 6G: Cut Verdict Bands + Final Role Corrections")
     print(f"{'='*60}")
 
     db = Database(db_path)
@@ -919,11 +964,25 @@ def run_analysis(deck_path: str, db_path: str) -> None:
     print(f"{'─'*60}")
     print(f"  Add {structural['lands_needed']} lands.  Cut {structural['nonland_cuts_needed']} nonlands.")
     print()
-    print("  Tier 1 — Safest cuts (0 primary roles, sorted by net cut score):")
-    print(f"  {'Card':<35} {'CMC':>3}  {'pressure':>8}  {'cost':>6}  {'net':>5}  fds")
+    print("  Tier 1 — Candidate cuts (0 primary roles) — split by verdict band:")
+    print(f"  {'Card':<35} {'CMC':>3}  {'net':>5}  Verdict")
     if cut_tier1:
-        for item in cut_tier1[:8]:
-            print(f"    {item['name']:<35} {item['cmc']:>3}  {item['pressure']:>8.2f}  {item['cut_cost']:>6.2f}  {item['net']:>5.2f}  {item['fds']:.2f}")
+        # Group by verdict band
+        bands = {
+            CUT_VERDICT_STRONG:     ("  A. Strong cut candidates (net ≥ 1.0):",     []),
+            CUT_VERDICT_BORDERLINE: ("  B. Borderline cut candidates (0.25-1.0):", []),
+            CUT_VERDICT_NEAR_ZERO:  ("  C. Near-zero review (0-0.25):",             []),
+            CUT_VERDICT_ROLE_REVIEW:("  D. Needs role review (high FDS, 0 primary):",[]),
+        }
+        for item in cut_tier1:
+            v = item["verdict"]
+            if v in bands:
+                bands[v][1].append(item)
+        for verdict_key, (label, items) in bands.items():
+            if items:
+                print(f"\n{label}")
+                for item in items:
+                    print(f"    {item['name']:<35} {item['cmc']:>3}  {item['net']:>5.2f}  [pressure={item['pressure']:.2f} cost={item['cut_cost']:.2f} fds={item['fds']:.2f}]")
     else:
         print("    None. (All 0-role cards are blind spots or identity-protected.)")
     print()
@@ -1335,24 +1394,41 @@ def _write_completion_plan_md(
         "## Cut Priority Order",
         "",
         f"Need to free ~{cuts_needed} nonland slots for lands.",
-        "Listed by cut pressure. Cut from Tier 1 first.",
+        "Listed by verdict band, then net score. Strong cuts first.",
         "",
-        "### Tier 1 — Safest cuts (0 primary roles)",
+        "### Tier 1 — Candidate cuts (0 primary roles)",
         "",
-        "These cards contribute only secondary/incidental role depth.",
-        "The deck absorbs these cuts with minimal role impact.",
+        "Split into verdict bands. `net = cut_pressure − cut_cost`.",
+        "High net = confident cut. Near-zero = evaluate carefully.",
+        "Cards in **D (needs_role_review)** may be misclassified —",
+        "do not cut until primary-role status is confirmed.",
         "",
     ]
 
     if tier1:
-        lines.append("| Card | CMC | Pressure | Cut cost | Net score | FDS |")
-        lines.append("|------|-----|----------|----------|-----------|-----|")
+        verdict_bands = [
+            (CUT_VERDICT_STRONG,      "#### A. Strong cut candidates (net ≥ 1.0)"),
+            (CUT_VERDICT_BORDERLINE,  "#### B. Borderline cut candidates (0.25–1.0)"),
+            (CUT_VERDICT_NEAR_ZERO,   "#### C. Near-zero review (0–0.25)"),
+            (CUT_VERDICT_ROLE_REVIEW, "#### D. Needs role review (high FDS, 0 primary)"),
+        ]
+        by_verdict: dict[str, list] = {v: [] for v, _ in verdict_bands}
         for item in tier1:
-            lines.append(
-                f"| {item['name']} | {item['cmc']} "
-                f"| {item['pressure']:.2f} | {item['cut_cost']:.2f} "
-                f"| {item['net']:.2f} | {item['fds']:.2f} |"
-            )
+            v = item.get("verdict", CUT_VERDICT_NEAR_ZERO)
+            if v in by_verdict:
+                by_verdict[v].append(item)
+        for verdict_key, heading in verdict_bands:
+            items = by_verdict[verdict_key]
+            if items:
+                lines += ["", heading, ""]
+                lines.append("| Card | CMC | Pressure | Cut cost | Net | FDS |")
+                lines.append("|------|-----|----------|----------|-----|-----|")
+                for item in items:
+                    lines.append(
+                        f"| {item['name']} | {item['cmc']} "
+                        f"| {item['pressure']:.2f} | {item['cut_cost']:.2f} "
+                        f"| {item['net']:.2f} | {item['fds']:.2f} |"
+                    )
     else:
         lines.append("None. (All 0-role cards are in the protected lists.)")
 

@@ -705,6 +705,9 @@ FUNCTIONAL_RULES: list[tuple[frozenset, str, float]] = [
 
     # ── Payoff ───────────────────────────────────────────────────────────────
     # Rewards executing the plan with damage, life, cards, or mana
+    # Death trigger + direct damage = payoff in aristocrats/damage-based strategies.
+    # Covers Syr Konrad, the Grim and similar "ping on death" cards.
+    (frozenset({"Death_Trigger", "Damage_Effect"}),                 "Payoff",            0.85),
     (frozenset({"Death_Trigger", "Life_Drain"}),                    "Payoff",            0.90),
     (frozenset({"Death_Trigger", "Life_Gain"}),                     "Payoff",            0.85),
     (frozenset({"Death_Trigger", "Draw_Effect"}),                   "Payoff",            0.85),

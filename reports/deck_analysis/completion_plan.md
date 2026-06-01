@@ -31,22 +31,41 @@ Roles with low primary coverage — protect these:
 ## Cut Priority Order
 
 Need to free ~13 nonland slots for lands.
-Listed by cut pressure. Cut from Tier 1 first.
+Listed by verdict band, then net score. Strong cuts first.
 
-### Tier 1 — Safest cuts (0 primary roles)
+### Tier 1 — Candidate cuts (0 primary roles)
 
-These cards contribute only secondary/incidental role depth.
-The deck absorbs these cuts with minimal role impact.
+Split into verdict bands. `net = cut_pressure − cut_cost`.
+High net = confident cut. Near-zero = evaluate carefully.
+Cards in **D (needs_role_review)** may be misclassified —
+do not cut until primary-role status is confirmed.
 
-| Card | CMC | Pressure | Cut cost | Net score | FDS |
-|------|-----|----------|----------|-----------|-----|
+
+#### A. Strong cut candidates (net ≥ 1.0)
+
+| Card | CMC | Pressure | Cut cost | Net | FDS |
+|------|-----|----------|----------|-----|-----|
 | Drivnod, Carnage Dominus | 5 | 1.60 | 0.00 | 1.60 | 1.30 |
 | Nyx Lotus | 4 | 1.30 | 0.00 | 1.30 | 0.65 |
-| Syr Konrad, the Grim | 5 | 1.00 | 0.00 | 1.00 | 0.35 |
+
+#### B. Borderline cut candidates (0.25–1.0)
+
+| Card | CMC | Pressure | Cut cost | Net | FDS |
+|------|-----|----------|----------|-----|-----|
 | Read the Bones | 3 | 1.60 | 0.75 | 0.85 | 1.30 |
-| Mind Stone | 2 | 1.90 | 1.50 | 0.40 | 1.95 |
+
+#### C. Near-zero review (0–0.25)
+
+| Card | CMC | Pressure | Cut cost | Net | FDS |
+|------|-----|----------|----------|-----|-----|
 | Night's Whisper | 2 | 1.60 | 1.50 | 0.10 | 1.30 |
 | Abnormal Endurance | 2 | 1.60 | 1.50 | 0.10 | 1.30 |
+
+#### D. Needs role review (high FDS, 0 primary)
+
+| Card | CMC | Pressure | Cut cost | Net | FDS |
+|------|-----|----------|----------|-----|-----|
+| Mind Stone | 2 | 1.90 | 1.50 | 0.40 | 1.95 |
 
 ### Tier 2 — Viable cuts (1+ primary roles)
 

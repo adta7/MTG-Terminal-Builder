@@ -46,7 +46,7 @@ Reasons:
 | Mana_Engine | 7 | 4 | 6.0 | 2–4 | 2.0–5.0 | HIGH | W_SLIGHTLY_HIGH |
 | Removal | 15 | 11 | 13.3 | 9–12 | 8.0–12.0 | HIGH | W_SLIGHTLY_HIGH |
 | Engine | 28 | 9 | 19.2 | 10–16 | 8.0–14.0 | HIGH | W_HIGH |
-| Payoff | 20 | 5 | 14.8 | 6–10 | 5.0–9.0 | HIGH | W_HIGH |
+| Payoff | 21 | 6 | 15.8 | 6–10 | 5.0–9.0 | HIGH | W_HIGH |
 | Fuel | 15 | 5 | 10.0 | 5–8 | 4.0–7.0 | HIGH | W_HIGH |
 | Recursion | 16 | 14 | 15.3 | 6–9 | 6.0–10.0 | HIGH | W_HIGH |
 | Conversion | 20 | 6 | 12.7 | 5–8 | 4.0–7.0 | HIGH | W_HIGH |
@@ -94,13 +94,13 @@ Logic: CMC 6+ and at least one over-represented role.
 
 | Card | CMC | Over-represented roles |
 |------|-----|------------------------|
-| Archon of Cruelty | 8 | Payoff, Threat, Interaction, Engine, Removal, Card_Draw |
-| Butcher of Malakir | 7 | Threat, Removal, Interaction, Engine |
-| Overseer of the Damned | 7 | Removal, Interaction |
+| Archon of Cruelty | 8 | Interaction, Card_Draw, Payoff, Threat, Removal, Engine |
+| Butcher of Malakir | 7 | Interaction, Engine, Threat, Removal |
+| Overseer of the Damned | 7 | Interaction, Removal |
 | Rune-Scarred Demon | 7 | Enabler |
-| Sheoldred, Whispering One | 7 | Threat, Engine, Interaction, Removal, Enabler, Recursion |
-| Grave Titan | 6 | Payoff, Fuel, Threat |
-| Nirkana Revenant | 6 | Mana_Engine, Mana_Acceleration |
+| Sheoldred, Whispering One | 7 | Interaction, Enabler, Threat, Recursion, Removal, Engine |
+| Grave Titan | 6 | Fuel, Threat, Payoff |
+| Nirkana Revenant | 6 | Mana_Acceleration, Mana_Engine |
 
 ### C. Parser Blind Spots
 
