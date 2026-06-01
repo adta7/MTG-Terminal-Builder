@@ -7,6 +7,7 @@ Answers:
   6C: "How important is each role on each card — primary, secondary, or incidental?"
   6D: "How do weighted targets compare to raw counts? What's the completion plan?"
   6E: "Are archetype-core cards correctly classified as primary role holders?"
+  6F: "What does cutting each card cost the deck? (cut_cost / role scarcity / curve)"
 
 Produces:
   reports/deck_analysis/gap_report.md             — full diagnostic report
@@ -195,6 +196,36 @@ PRIMARY_ROLE_OVERRIDES: dict[str, list[str]] = {
 
     # Free sacrifice outlet — in aristocrats, Enabler is the PRIMARY function.
     "Woe Strider":        ["Enabler"],
+
+    # Upkeep token generators — in aristocrats, these are dedicated fuel sources.
+    # A 1/1 deathtouch snake / 2/2 zombie every upkeep is primary Fuel, not incidental.
+    "Ophiomancer":                    ["Fuel"],
+    "Jadar, Ghoulcaller of Nephalia": ["Fuel"],
+
+    # Instant-speed card draw / conversion — the sacrifice is a cost, not coincidence.
+    # These are played for the draw; they smooth early turns and refuel mid-combo.
+    "Deadly Dispute":     ["Card_Draw"],
+    "Plumb the Forbidden":["Card_Draw", "Conversion"],
+    "Disciple of Bolas":  ["Card_Draw"],
+}
+
+# ── Cut cost constants (Phase 6F) ────────────────────────────────────────────
+# Cut pressure asks "why might we remove this card?"
+# Cut cost asks "what does the deck lose by removing it?"
+# net_cut_score = cut_pressure - cut_cost. Only cards with net > 0 appear in tiers.
+
+EARLY_CURVE_PROTECTION: dict[int, float] = {
+    1: 2.0,   # CMC 1: near-irreplaceable early efficiency
+    2: 1.5,   # CMC 2: valuable curve piece; losing one hurts early game
+    3: 0.75,  # CMC 3: moderate protection
+}
+
+SCARCITY_PENALTY: dict[str, float] = {
+    "W_CRITICAL":      3.0,   # role is dangerously thin — very high cost to cut from it
+    "W_LOW":           2.0,   # role is below target — cutting from it hurts
+    "W_OK":            0.0,   # role is healthy — no scarcity penalty
+    "W_SLIGHTLY_HIGH": 0.0,   # over-target — removing one card is fine
+    "W_HIGH":          0.0,   # well over-target — removing is encouraged
 }
 
 # ── Primary role validation (Phase 6E) ───────────────────────────────────────
@@ -209,6 +240,11 @@ PRIMARY_ROLE_VALIDATION: dict[str, str] = {
     "Plaguecrafter":      "Primary removal — ETB forced sacrifice",
     "Accursed Marauder":  "Primary removal — ETB forced sacrifice",
     "Woe Strider":        "Primary enabler — free sacrifice outlet",
+    "Ophiomancer":        "Primary fuel — snake token every upkeep",
+    "Jadar, Ghoulcaller of Nephalia": "Primary fuel — zombie token on sacrifice turns",
+    "Deadly Dispute":     "Primary card draw — instant-speed draw 2 with sacrifice cost",
+    "Plumb the Forbidden":"Primary card draw + conversion — sacrifice X to draw X at instant speed",
+    "Disciple of Bolas":  "Primary card draw — ETB sacrifice to draw X",
 }
 
 PRIORITY_GAPS = [
@@ -520,18 +556,22 @@ def compute_cut_pressure(
     deck_infos: list,
     weighted_by_card: dict,
     commander: str = "",
+    role_breakdown: dict | None = None,
 ) -> list[dict]:
     """
-    Rank nonland cards by how safely they can be cut to free land slots.
+    Rank nonland cards by net_cut_score = cut_pressure - cut_cost.
 
-    Score is based on:
-    - +2 per CMC above 5 (high cost = structural pressure)
-    - +1.0 if no primary roles (safest cuts)
-    - +0.5 per secondary role that is over-target
-    - -2 per primary role (harder to cut)
-    - Identity-protected and blind-spot cards are put in separate tiers.
+    cut_pressure: why the deck wants to remove this card.
+      - +2 per CMC above 5 (structural pressure from land needs)
+      - +1 if no primary roles
+      - +0.3 per secondary role
 
-    Returns list sorted by cut_pressure DESC within each tier.
+    cut_cost: what the deck loses by removing this card.
+      - +EARLY_CURVE_PROTECTION[cmc] for CMC 1-3
+      - +SCARCITY_PENALTY[w_status] × role_weight for each scarce role
+
+    Only cards with net_cut_score > 0 appear in Tier 1 or Tier 2.
+    Identity-protected and unresolved blind-spot cards go to Tier 3.
     """
     # Only unresolved blind spots (needs_rule) are protected — fixed blind spots
     # (fixed_in_6B) are now properly tagged and evaluated like any other card.
@@ -568,24 +608,34 @@ def compute_cut_pressure(
             continue
 
         pressure = 0.0
-        pressure += max(0, c["cmc"] - 5) * 2.0   # CMC penalty
-        pressure += 1.0 if primary_count == 0 else 0.0  # 0-primary bonus
-        pressure -= primary_count * 2.0             # primary-role protection
-        pressure += secondary_count * 0.3           # minor push from secondary count
+        pressure += max(0, c["cmc"] - 5) * 2.0
+        pressure += 1.0 if primary_count == 0 else 0.0
+        pressure += secondary_count * 0.3
+
+        # cut_cost: what the deck loses by removing this card
+        cut_cost = EARLY_CURVE_PROTECTION.get(c["cmc"], 0.0)
+
+        if role_breakdown:
+            for role, info in wr.items():
+                w_status = role_breakdown.get(role, {}).get("w_status", "W_OK")
+                scarcity = SCARCITY_PENALTY.get(w_status, 0.0)
+                # Weight the penalty by how much this card contributes to the role
+                cut_cost += scarcity * info["weight"]
+
+        net = pressure - cut_cost
 
         entry = {
             "name": c["name"], "cmc": c["cmc"],
             "primary": primary_count, "secondary": secondary_count,
-            "fds": fds, "pressure": pressure,
+            "fds": fds, "pressure": pressure, "cut_cost": cut_cost, "net": net,
         }
-        if primary_count == 0 and pressure > 0:
+        if primary_count == 0 and net > 0:
             tier1.append(entry)
-        elif primary_count > 0 and pressure > 0 and c["cmc"] >= 5:
-            # Tier 2: only high-CMC cards with actual structural pressure
+        elif primary_count > 0 and net > 0 and c["cmc"] >= 5:
             tier2.append(entry)
 
-    tier1.sort(key=lambda x: (-x["pressure"], -x["cmc"]))
-    tier2.sort(key=lambda x: (-x["pressure"], -x["cmc"]))
+    tier1.sort(key=lambda x: (-x["net"], -x["cmc"]))
+    tier2.sort(key=lambda x: (-x["net"], -x["cmc"]))
 
     return tier1, tier2, tier3
 
@@ -639,7 +689,7 @@ def run_analysis(deck_path: str, db_path: str) -> None:
     print(f"\n{'='*60}")
     print(f"  DECK GAP ANALYSIS — {deck_name.upper()}")
     print(f"  Commander: {commander}")
-    print(f"  Phase 6E: Primary Role Correction / Archetype Role Overrides")
+    print(f"  Phase 6F: Cut Cost / Role Scarcity")
     print(f"{'='*60}")
 
     db = Database(db_path)
@@ -681,7 +731,9 @@ def run_analysis(deck_path: str, db_path: str) -> None:
 
     # Phase 6D: priority breakdown and cut pressure
     role_breakdown = compute_role_priority_breakdown(deck_infos, weighted_by_card)
-    cut_tier1, cut_tier2, cut_tier3 = compute_cut_pressure(deck_infos, weighted_by_card, commander)
+    cut_tier1, cut_tier2, cut_tier3 = compute_cut_pressure(
+        deck_infos, weighted_by_card, commander, role_breakdown
+    )
 
     # ── Print structural status ───────────────────────────────────────────────
     print(f"\n{'─'*60}")
@@ -863,21 +915,22 @@ def run_analysis(deck_path: str, db_path: str) -> None:
 
     # ── Completion planner ────────────────────────────────────────────────────
     print(f"\n{'─'*60}")
-    print("COMPLETION PLANNER (Phase 6E — archetype-aware)")
+    print("COMPLETION PLANNER (Phase 6F — cut cost aware)")
     print(f"{'─'*60}")
     print(f"  Add {structural['lands_needed']} lands.  Cut {structural['nonland_cuts_needed']} nonlands.")
     print()
-    print("  Tier 1 — Safest cuts (0 primary roles, sorted by cut pressure):")
+    print("  Tier 1 — Safest cuts (0 primary roles, sorted by net cut score):")
+    print(f"  {'Card':<35} {'CMC':>3}  {'pressure':>8}  {'cost':>6}  {'net':>5}  fds")
     if cut_tier1:
         for item in cut_tier1[:8]:
-            print(f"    CMC {item['cmc']}  {item['name']:<35}  fds={item['fds']:.2f}  pressure={item['pressure']:.1f}")
+            print(f"    {item['name']:<35} {item['cmc']:>3}  {item['pressure']:>8.2f}  {item['cut_cost']:>6.2f}  {item['net']:>5.2f}  {item['fds']:.2f}")
     else:
         print("    None. (All 0-role cards are blind spots or identity-protected.)")
     print()
     print("  Tier 2 — Viable cuts (1+ primary roles, only if Tier 1 exhausted):")
     if cut_tier2:
         for item in cut_tier2[:6]:
-            print(f"    CMC {item['cmc']}  {item['name']:<35}  primary={item['primary']}  fds={item['fds']:.2f}")
+            print(f"    {item['name']:<35} {item['cmc']:>3}  primary={item['primary']}  net={item['net']:.2f}  fds={item['fds']:.2f}")
     else:
         print("    None.")
     print()
@@ -1292,12 +1345,13 @@ def _write_completion_plan_md(
     ]
 
     if tier1:
-        lines.append("| Card | CMC | Functional density | Cut pressure |")
-        lines.append("|------|-----|--------------------|--------------|")
+        lines.append("| Card | CMC | Pressure | Cut cost | Net score | FDS |")
+        lines.append("|------|-----|----------|----------|-----------|-----|")
         for item in tier1:
             lines.append(
                 f"| {item['name']} | {item['cmc']} "
-                f"| {item['fds']:.2f} | {item['pressure']:.1f} |"
+                f"| {item['pressure']:.2f} | {item['cut_cost']:.2f} "
+                f"| {item['net']:.2f} | {item['fds']:.2f} |"
             )
     else:
         lines.append("None. (All 0-role cards are in the protected lists.)")
@@ -1312,12 +1366,12 @@ def _write_completion_plan_md(
     ]
 
     if tier2:
-        lines.append("| Card | CMC | Primary roles | Functional density |")
-        lines.append("|------|-----|---------------|--------------------|")
+        lines.append("| Card | CMC | Primary | Net score | FDS |")
+        lines.append("|------|-----|---------|-----------|-----|")
         for item in tier2[:10]:
             lines.append(
                 f"| {item['name']} | {item['cmc']} "
-                f"| {item['primary']} | {item['fds']:.2f} |"
+                f"| {item['primary']} | {item['net']:.2f} | {item['fds']:.2f} |"
             )
     else:
         lines.append("None.")

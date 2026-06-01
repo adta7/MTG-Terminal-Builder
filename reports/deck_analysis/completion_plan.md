@@ -38,38 +38,30 @@ Listed by cut pressure. Cut from Tier 1 first.
 These cards contribute only secondary/incidental role depth.
 The deck absorbs these cuts with minimal role impact.
 
-| Card | CMC | Functional density | Cut pressure |
-|------|-----|--------------------|--------------|
-| Mind Stone | 2 | 1.95 | 1.9 |
-| Plumb the Forbidden | 2 | 2.30 | 1.9 |
-| Drivnod, Carnage Dominus | 5 | 1.30 | 1.6 |
-| Disciple of Bolas | 4 | 1.30 | 1.6 |
-| Ophiomancer | 3 | 1.30 | 1.6 |
-| Read the Bones | 3 | 1.30 | 1.6 |
-| Deadly Dispute | 2 | 1.65 | 1.6 |
-| Jadar, Ghoulcaller of Nephalia | 2 | 1.30 | 1.6 |
-| Night's Whisper | 2 | 1.30 | 1.6 |
-| Abnormal Endurance | 2 | 1.30 | 1.6 |
-| Stitcher's Supplier | 1 | 2.00 | 1.6 |
-| Nyx Lotus | 4 | 0.65 | 1.3 |
-| Arcane Signet | 2 | 0.65 | 1.3 |
-| Cabal Ritual | 2 | 0.65 | 1.3 |
-| Jet Medallion | 2 | 1.00 | 1.3 |
-| Carrion Feeder | 1 | 0.65 | 1.3 |
-| Dark Ritual | 1 | 0.65 | 1.3 |
-| Sol Ring | 1 | 0.65 | 1.3 |
-| Viscera Seer | 1 | 0.65 | 1.3 |
-| Syr Konrad, the Grim | 5 | 0.35 | 1.0 |
+| Card | CMC | Pressure | Cut cost | Net score | FDS |
+|------|-----|----------|----------|-----------|-----|
+| Drivnod, Carnage Dominus | 5 | 1.60 | 0.00 | 1.60 | 1.30 |
+| Nyx Lotus | 4 | 1.30 | 0.00 | 1.30 | 0.65 |
+| Syr Konrad, the Grim | 5 | 1.00 | 0.00 | 1.00 | 0.35 |
+| Read the Bones | 3 | 1.60 | 0.75 | 0.85 | 1.30 |
+| Mind Stone | 2 | 1.90 | 1.50 | 0.40 | 1.95 |
+| Night's Whisper | 2 | 1.60 | 1.50 | 0.10 | 1.30 |
+| Abnormal Endurance | 2 | 1.60 | 1.50 | 0.10 | 1.30 |
 
 ### Tier 2 — Viable cuts (1+ primary roles)
 
 Only cut from here if Tier 1 is exhausted.
 Each cut removes some primary-role coverage — evaluate impact before cutting.
 
-| Card | CMC | Primary roles | Functional density |
-|------|-----|---------------|--------------------|
-| Archon of Cruelty | 8 | 1 | 4.30 |
-| Rune-Scarred Demon | 7 | 2 | 3.00 |
+| Card | CMC | Primary | Net score | FDS |
+|------|-----|---------|-----------|-----|
+| Archon of Cruelty | 8 | 1 | 7.20 | 4.30 |
+| Rune-Scarred Demon | 7 | 2 | 4.30 | 3.00 |
+| Butcher of Malakir | 7 | 4 | 4.00 | 4.00 |
+| Overseer of the Damned | 7 | 2 | 4.00 | 2.00 |
+| Grave Titan | 6 | 2 | 2.30 | 2.65 |
+| Nirkana Revenant | 6 | 2 | 2.30 | 2.65 |
+| Gray Merchant of Asphodel | 5 | 2 | 0.30 | 2.65 |
 
 ### Tier 3 — Do not cut (protected)
 
