@@ -274,14 +274,18 @@ PRIMARY_ROLE_VALIDATION: dict[str, str] = {
 }
 
 # ── Preference profile (Phase 8) ──────────────────────────────────────────────
-# Maps each deck identity pillar to a weight.
-# 0.0 = don't care / 1.0 = moderate preserve / 2.0 = strong preserve.
-# "lower_curve_aggressively" adds to cut_pressure instead of cut_cost.
+# This is not a generic default — it reflects a specific deck identity.
+# Rename and duplicate this dict when analyzing different commanders or strategies.
+PREFERENCE_PROFILE_NAME = "sheoldred_recursive_sacrifice_midrange"
+
+# Weight scale: 0.0 = do not care / 1.0 = moderate preserve / 2.0 = strongly preserve.
+# "lower_curve_aggressively" is the exception: it adds to cut_pressure instead of cut_cost.
 #
-# These weights reflect the known deck philosophy (from CLAUDE.md and prior sessions):
-#   - sacrifice engines, recursion, and reanimation ARE the deck's identity
-#   - big black creatures and apex threats are desirable but not untouchable
-#   - mana scaling is secondary to the core engine/recursion plan
+# Profile rationale (Sheoldred mono-black aristocrats/reanimator):
+#   - sacrifice engines, recursion, and reanimation ARE the deck's core identity
+#   - big black creatures and apex threats are valued but not identity-defining
+#   - mana scaling is secondary to the engine/recursion plan
+#   - changing any weight here changes which cuts the model recommends
 DEFAULT_PREFERENCES: dict[str, float] = {
     "preserve_big_mythic_threats":  0.8,   # apex threats valued but not sacrosanct
     "preserve_sacrifice_control":   1.5,   # edict/forced-sac effects = core identity
@@ -1682,12 +1686,17 @@ def _write_preference_cut_review(
     cut_if_needed = [c for c in tier2_adjusted if c["preference_adjusted_net"] > 3]
 
     # MD report
+    profile_name = PREFERENCE_PROFILE_NAME
+
     lines = [
         "# Preference-Weighted Cut Review",
         "",
+        f"**Preference profile:** `{profile_name}`  ",
         "> Tier 2 cuts ranked by preference-adjusted net score.",
         "> Cards scoring high here are under both structural pressure AND align with",
         "> a pillar the player has *not* marked as high-priority to preserve.",
+        "> **Changing preference weights changes this ranking.** Adjust `DEFAULT_PREFERENCES`",
+        "> in `deck_gap_analysis.py` and re-run to see a different ranking.",
         "",
         "---",
         "",
@@ -1716,7 +1725,8 @@ def _write_preference_cut_review(
         "",
         "### Avoid cutting (preference-adjusted net ≤ 0)",
         "",
-        "Your preferences protect these. Do not cut without reconsidering your weights.",
+        "These cards are **strongly protected by current preference weights**.",
+        "Adjust `DEFAULT_PREFERENCES` to reconsider — rankings change when weights change.",
         "",
     ]
     if prefer_avoid:
@@ -1779,14 +1789,15 @@ def _write_preference_cut_review(
         "",
         "1. Cut all **'cut if needed'** cards first to stay within preferred pillars.",
         "2. If still short, move to **'consider carefully'** — review each impact.",
-        "3. **'Avoid cutting'** should only be touched after adjusting preference weights.",
-        "4. Return to `deck_gap_analysis.py → DEFAULT_PREFERENCES` to tune weights.",
+        "3. **'Avoid cutting'** cards are strongly protected by current weights — adjust `DEFAULT_PREFERENCES` to reconsider them.",
+        "4. All rankings change when weights change. Tune `DEFAULT_PREFERENCES` in `deck_gap_analysis.py` and re-run.",
     ]
 
     (REPORTS / "preference_cut_review.md").write_text("\n".join(lines))
 
     # JSON report
     pref_json = {
+        "preference_profile_name": PREFERENCE_PROFILE_NAME,
         "preferences": preferences,
         "cuts_still_needed": cuts_still_needed,
         "tier2_ranked": [

@@ -1,8 +1,11 @@
 # Preference-Weighted Cut Review
 
+**Preference profile:** `sheoldred_recursive_sacrifice_midrange`  
 > Tier 2 cuts ranked by preference-adjusted net score.
 > Cards scoring high here are under both structural pressure AND align with
 > a pillar the player has *not* marked as high-priority to preserve.
+> **Changing preference weights changes this ranking.** Adjust `DEFAULT_PREFERENCES`
+> in `deck_gap_analysis.py` and re-run to see a different ranking.
 
 ---
 
@@ -24,7 +27,8 @@
 
 ### Avoid cutting (preference-adjusted net ≤ 0)
 
-Your preferences protect these. Do not cut without reconsidering your weights.
+These cards are **strongly protected by current preference weights**.
+Adjust `DEFAULT_PREFERENCES` to reconsider — rankings change when weights change.
 
 | Card | CMC | Adj net | Protected by |
 |------|-----|---------|--------------|
@@ -57,5 +61,5 @@ Cutting from here first preserves your preferred pillars.
 
 1. Cut all **'cut if needed'** cards first to stay within preferred pillars.
 2. If still short, move to **'consider carefully'** — review each impact.
-3. **'Avoid cutting'** should only be touched after adjusting preference weights.
-4. Return to `deck_gap_analysis.py → DEFAULT_PREFERENCES` to tune weights.
+3. **'Avoid cutting'** cards are strongly protected by current weights — adjust `DEFAULT_PREFERENCES` to reconsider them.
+4. All rankings change when weights change. Tune `DEFAULT_PREFERENCES` in `deck_gap_analysis.py` and re-run.
