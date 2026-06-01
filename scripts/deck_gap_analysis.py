@@ -790,6 +790,87 @@ def find_candidates(db, role: str, deck_names: set[str], limit: int = 8) -> list
     return results[:limit]
 
 
+# ── Shared data loader (used by run_analysis and interactive_cut_review) ──────
+
+def load_analysis_data(deck_path: str = DECK_PATH, db_path: str = SCAN_DB) -> dict:
+    """
+    Load deck, tag all cards, and return computed analysis data structures.
+
+    Called by run_analysis() (which then writes all reports) and by
+    interactive_cut_review.py (which uses the data for the preference flow).
+
+    The database connection is opened, used, and closed inside this function.
+    All returned data is in-memory — no DB handle is returned.
+    """
+    deck          = load_deck(deck_path)
+    deck_cards_raw = deck.get("cards", [])
+    deck_name     = deck.get("name", "Unknown")
+    commander     = deck.get("commander", "Sheoldred, Whispering One")
+
+    db = Database(db_path)
+    db.connect()
+    seed_tags(db)
+
+    deck_names_normalized: set[str] = set()
+    deck_infos: list[dict] = []
+
+    for entry in deck_cards_raw:
+        raw_name    = entry["name"].strip()
+        c           = db.card_by_name(raw_name)
+        actual_name = c.name if c else raw_name
+        deck_names_normalized.add(actual_name.lower())
+        if c:
+            tag_mechanical(c, db)
+            tag_functional_from_rules(actual_name, db)
+        deck_infos.append(card_info(db, actual_name))
+
+    lands      = [c for c in deck_infos if is_land(c)]
+    structural = compute_structural_status(len(deck_cards_raw), len(lands))
+
+    weighted_by_card: dict[str, dict] = {}
+    for c in deck_infos:
+        weighted_by_card[c["name"]] = compute_weighted_roles(c["name"], db)
+
+    weighted_role_totals: dict[str, float] = defaultdict(float)
+    for card_weighted in weighted_by_card.values():
+        for role, info in card_weighted.items():
+            weighted_role_totals[role] += info["weight"]
+
+    role_breakdown  = compute_role_priority_breakdown(deck_infos, weighted_by_card)
+
+    role_counts: Counter = Counter()
+    for c in deck_infos:
+        for role in c["func"]:
+            role_counts[role] += 1
+
+    role_status: dict = {}
+    for role, targets in TARGETS.items():
+        count  = role_counts.get(role, 0)
+        status = gap_status(count, targets)
+        role_status[role] = (count, targets, status)
+
+    cut_tier1, cut_tier2, cut_tier3 = compute_cut_pressure(
+        deck_infos, weighted_by_card, commander, role_breakdown
+    )
+
+    db.close()
+
+    return {
+        "deck_name":             deck_name,
+        "commander":             commander,
+        "deck_infos":            deck_infos,
+        "deck_names_normalized": deck_names_normalized,
+        "structural":            structural,
+        "weighted_by_card":      weighted_by_card,
+        "weighted_role_totals":  dict(weighted_role_totals),
+        "role_breakdown":        role_breakdown,
+        "role_status":           role_status,
+        "cut_tier1":             cut_tier1,
+        "cut_tier2":             cut_tier2,
+        "cut_tier3":             cut_tier3,
+    }
+
+
 # ── Main analysis ─────────────────────────────────────────────────────────────
 
 def run_analysis(deck_path: str, db_path: str) -> None:
