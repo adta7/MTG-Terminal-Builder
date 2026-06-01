@@ -10,6 +10,7 @@ Answers:
   6F: "What does cutting each card cost the deck? (cut_cost / role scarcity / curve)"
   6G: "Cut verdict bands — strong / borderline / near-zero / needs_role_review"
   7:  "Deck completion simulation — structural path to 100 cards"
+  8:  "Preference-weighted cut review — player identity pillars guide Tier 2 ranking"
 
 Produces:
   reports/deck_analysis/gap_report.md             — full diagnostic report
@@ -270,6 +271,48 @@ PRIMARY_ROLE_VALIDATION: dict[str, str] = {
     "Plumb the Forbidden":"Primary card draw + conversion — sacrifice X to draw X at instant speed",
     "Disciple of Bolas":  "Primary card draw — ETB sacrifice to draw X",
     "Syr Konrad, the Grim": "Primary payoff — pings each opponent on every creature death/graveyard event",
+}
+
+# ── Preference profile (Phase 8) ──────────────────────────────────────────────
+# Maps each deck identity pillar to a weight.
+# 0.0 = don't care / 1.0 = moderate preserve / 2.0 = strong preserve.
+# "lower_curve_aggressively" adds to cut_pressure instead of cut_cost.
+#
+# These weights reflect the known deck philosophy (from CLAUDE.md and prior sessions):
+#   - sacrifice engines, recursion, and reanimation ARE the deck's identity
+#   - big black creatures and apex threats are desirable but not untouchable
+#   - mana scaling is secondary to the core engine/recursion plan
+DEFAULT_PREFERENCES: dict[str, float] = {
+    "preserve_big_mythic_threats":  0.8,   # apex threats valued but not sacrosanct
+    "preserve_sacrifice_control":   1.5,   # edict/forced-sac effects = core identity
+    "preserve_draw_consistency":    1.0,   # draw smoothing is important early
+    "preserve_mana_explosion":      0.8,   # mana scaling is good but secondary
+    "preserve_token_fuel_density":  1.2,   # token generators = renewable fuel
+    "preserve_recursion_density":   1.5,   # recursion IS the deck — protect it
+    "lower_curve_aggressively":     0.5,   # mild curve pressure (not aggressive)
+}
+
+# Maps functional roles to preference categories.
+# A card's primary roles are checked here to determine how much extra cut_cost
+# is added by the player's preference weights.
+ROLE_PREFERENCE_MAP: dict[str, str] = {
+    "Threat":            "preserve_big_mythic_threats",
+    "Finisher":          "preserve_big_mythic_threats",
+    "Finisher_Support":  "preserve_big_mythic_threats",
+    "Removal":           "preserve_sacrifice_control",
+    "Interaction":       "preserve_sacrifice_control",
+    "Protection":        "preserve_sacrifice_control",
+    "Card_Draw":         "preserve_draw_consistency",
+    "Card_Advantage":    "preserve_draw_consistency",
+    "Setup":             "preserve_draw_consistency",
+    "Mana_Acceleration": "preserve_mana_explosion",
+    "Mana_Engine":       "preserve_mana_explosion",
+    "Conversion":        "preserve_mana_explosion",
+    "Fuel":              "preserve_token_fuel_density",
+    "Payoff":            "preserve_token_fuel_density",
+    "Recursion":         "preserve_recursion_density",
+    "Enabler":           "preserve_recursion_density",
+    "Engine":            "preserve_sacrifice_control",  # engines in this deck are edict-based
 }
 
 PRIORITY_GAPS = [
@@ -756,7 +799,7 @@ def run_analysis(deck_path: str, db_path: str) -> None:
     print(f"\n{'='*60}")
     print(f"  DECK GAP ANALYSIS — {deck_name.upper()}")
     print(f"  Commander: {commander}")
-    print(f"  Phase 7: Deck Completion Simulation")
+    print(f"  Phase 8: Preference-Weighted Cut Review")
     print(f"{'='*60}")
 
     db = Database(db_path)
@@ -1058,6 +1101,16 @@ def run_analysis(deck_path: str, db_path: str) -> None:
     _write_deck_completion_simulation_md(
         structural, cut_tier1, cut_tier2, cut_tier3, weighted_by_card, role_breakdown
     )
+    # Phase 8: preference-weighted cut review for the human-required Tier 2 cuts
+    sim_confident = sum(
+        1 for c in cut_tier1
+        if c["verdict"] in (CUT_VERDICT_STRONG, CUT_VERDICT_BORDERLINE)
+    )
+    cuts_still_needed = max(0, structural["nonland_cuts_needed"] - sim_confident)
+    tier2_adjusted = compute_preference_adjusted_cuts(
+        cut_tier2, weighted_by_card, DEFAULT_PREFERENCES
+    )
+    _write_preference_cut_review(tier2_adjusted, DEFAULT_PREFERENCES, cuts_still_needed)
 
     print(f"\n{'─'*60}")
     print("REPORTS WRITTEN")
@@ -1534,8 +1587,8 @@ def _write_deck_completion_simulation_md(
 
     # Add machine-readable simulation status header
     simulation_status = {
-        "complete_confident_path_available": False,
-        "confident_cuts_available": confident_cuts + borderline_cuts,
+        "complete_confident_path_available": (confident_cuts + borderline_cuts >= cuts_needed),
+        "medium_or_higher_confidence_cuts_available": confident_cuts + borderline_cuts,
         "high_confidence_cuts": confident_cuts,
         "medium_confidence_cuts": borderline_cuts,
         "human_required_cuts": remaining_after_2,
@@ -1555,6 +1608,203 @@ def _write_deck_completion_simulation_md(
         json.dumps(simulation_status, indent=2)
     )
     (REPORTS / "deck_completion_simulation.md").write_text("\n".join(lines))
+
+
+def compute_preference_adjusted_cuts(
+    tier2: list,
+    weighted_by_card: dict,
+    preferences: dict | None = None,
+) -> list[dict]:
+    """
+    Re-rank Tier 2 cuts using player preference weights.
+
+    preference_adjusted_cut_cost = base_cut_cost + sum(pref_weight × role_weight)
+      where pref_weight is the player's weight for each primary role's preference category.
+
+    lower_curve_aggressively adds to cut_pressure, not cut_cost:
+      lower_curve_boost = lower_curve_weight × max(0, cmc - 4)
+
+    Returns a new list sorted by preference_adjusted_net (DESC).
+    """
+    if preferences is None:
+        preferences = DEFAULT_PREFERENCES
+
+    lower_curve = preferences.get("lower_curve_aggressively", 0.0)
+    adjusted = []
+
+    for item in tier2:
+        wr = weighted_by_card.get(item["name"], {})
+
+        # Preference cost: sum over primary roles that match a preference category
+        pref_cost = 0.0
+        pref_categories_hit: list[str] = []
+        for role, info in wr.items():
+            if info["priority"] == "primary":
+                category = ROLE_PREFERENCE_MAP.get(role)
+                if category and category != "lower_curve_aggressively":
+                    weight = preferences.get(category, 0.0)
+                    pref_cost += weight * PRIMARY_WEIGHT
+                    if category not in pref_categories_hit:
+                        pref_categories_hit.append(category)
+
+        # Lower curve preference adds pressure for high CMC
+        curve_boost = lower_curve * max(0, item["cmc"] - 4)
+
+        adj_pressure = item["pressure"] + curve_boost
+        adj_cost     = item["cut_cost"] + pref_cost
+        adj_net      = adj_pressure - adj_cost
+
+        primary_roles = sorted(r for r, v in wr.items() if v["priority"] == "primary")
+
+        adjusted.append({
+            **item,
+            "preference_adjusted_pressure": adj_pressure,
+            "preference_adjusted_cut_cost": adj_cost,
+            "preference_adjusted_net":      adj_net,
+            "preference_categories_hit":    pref_categories_hit,
+            "primary_roles":                primary_roles,
+        })
+
+    adjusted.sort(key=lambda x: -x["preference_adjusted_net"])
+    return adjusted
+
+
+def _write_preference_cut_review(
+    tier2_adjusted: list,
+    preferences: dict,
+    cuts_still_needed: int,
+) -> None:
+    """Write preference-weighted Tier 2 cut review as MD and JSON."""
+
+    # Classify each card by adjusted net vs cuts needed
+    prefer_avoid  = [c for c in tier2_adjusted if c["preference_adjusted_net"] <= 0]
+    consider      = [c for c in tier2_adjusted if 0 < c["preference_adjusted_net"] <= 3]
+    cut_if_needed = [c for c in tier2_adjusted if c["preference_adjusted_net"] > 3]
+
+    # MD report
+    lines = [
+        "# Preference-Weighted Cut Review",
+        "",
+        "> Tier 2 cuts ranked by preference-adjusted net score.",
+        "> Cards scoring high here are under both structural pressure AND align with",
+        "> a pillar the player has *not* marked as high-priority to preserve.",
+        "",
+        "---",
+        "",
+        "## Active Preference Profile",
+        "",
+        "| Preference | Weight | Meaning |",
+        "|-----------|--------|---------|",
+    ]
+    pref_labels = {
+        "preserve_big_mythic_threats":  "Apex threats / finishers",
+        "preserve_sacrifice_control":   "Edict effects / sacrifice engines",
+        "preserve_draw_consistency":    "Card draw / hand smoothing",
+        "preserve_mana_explosion":      "Mana scaling / acceleration",
+        "preserve_token_fuel_density":  "Token generation / fuel supply",
+        "preserve_recursion_density":   "Graveyard recursion",
+        "lower_curve_aggressively":     "Curve pressure (adds to cut pressure for CMC>4)",
+    }
+    for pref, weight in preferences.items():
+        lines.append(f"| {pref} | {weight:.1f} | {pref_labels.get(pref, '')} |")
+
+    lines += [
+        "",
+        "---",
+        "",
+        f"## Tier 2 Re-Ranked (preference-adjusted, {cuts_still_needed} still needed)",
+        "",
+        "### Avoid cutting (preference-adjusted net ≤ 0)",
+        "",
+        "Your preferences protect these. Do not cut without reconsidering your weights.",
+        "",
+    ]
+    if prefer_avoid:
+        lines.append("| Card | CMC | Adj net | Protected by |")
+        lines.append("|------|-----|---------|--------------|")
+        for c in prefer_avoid:
+            cats = ", ".join(c["preference_categories_hit"]) or "—"
+            lines.append(
+                f"| {c['name']} | {c['cmc']} "
+                f"| {c['preference_adjusted_net']:.2f} | {cats} |"
+            )
+    else:
+        lines.append("None — all Tier 2 cards are under positive cut pressure even with preferences.")
+
+    lines += [
+        "",
+        "### Consider carefully (adj net 0–3)",
+        "",
+        "Cutting these removes preferred roles. Evaluate specific impact before deciding.",
+        "",
+    ]
+    if consider:
+        lines.append("| Card | CMC | Adj net | Primary roles lost | Preference categories |")
+        lines.append("|------|-----|---------|---------------------|----------------------|")
+        for c in consider:
+            lost = ", ".join(c["primary_roles"])
+            cats = ", ".join(c["preference_categories_hit"]) or "—"
+            lines.append(
+                f"| {c['name']} | {c['cmc']} "
+                f"| {c['preference_adjusted_net']:.2f} | {lost} | {cats} |"
+            )
+    else:
+        lines.append("None.")
+
+    lines += [
+        "",
+        "### Cut if needed (adj net > 3)",
+        "",
+        "These have structural cut pressure that outweighs your preference protection.",
+        "Cutting from here first preserves your preferred pillars.",
+        "",
+    ]
+    if cut_if_needed:
+        lines.append("| Card | CMC | Base net | Adj net | Lower curve boost |")
+        lines.append("|------|-----|----------|---------|-------------------|")
+        for c in cut_if_needed:
+            boost = c["preference_adjusted_pressure"] - c["pressure"]
+            lines.append(
+                f"| {c['name']} | {c['cmc']} "
+                f"| {c['net']:.2f} | {c['preference_adjusted_net']:.2f} | +{boost:.2f} |"
+            )
+    else:
+        lines.append("None — all remaining Tier 2 cuts are blocked by preferences.")
+
+    lines += [
+        "",
+        "---",
+        "",
+        "## How to Use This Report",
+        "",
+        "1. Cut all **'cut if needed'** cards first to stay within preferred pillars.",
+        "2. If still short, move to **'consider carefully'** — review each impact.",
+        "3. **'Avoid cutting'** should only be touched after adjusting preference weights.",
+        "4. Return to `deck_gap_analysis.py → DEFAULT_PREFERENCES` to tune weights.",
+    ]
+
+    (REPORTS / "preference_cut_review.md").write_text("\n".join(lines))
+
+    # JSON report
+    pref_json = {
+        "preferences": preferences,
+        "cuts_still_needed": cuts_still_needed,
+        "tier2_ranked": [
+            {
+                "name": c["name"],
+                "cmc": c["cmc"],
+                "base_net": round(c["net"], 2),
+                "preference_adjusted_net": round(c["preference_adjusted_net"], 2),
+                "primary_roles": c["primary_roles"],
+                "preference_categories_hit": c["preference_categories_hit"],
+                "model_confidence": c.get("confidence", "low"),
+            }
+            for c in tier2_adjusted
+        ],
+    }
+    (REPORTS / "preference_cut_review.json").write_text(
+        json.dumps(pref_json, indent=2)
+    )
 
 
 def _write_weighted_role_targets_csv(role_breakdown: dict) -> None:

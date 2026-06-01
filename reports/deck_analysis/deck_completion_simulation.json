@@ -1,6 +1,6 @@
 {
   "complete_confident_path_available": false,
-  "confident_cuts_available": 3,
+  "medium_or_higher_confidence_cuts_available": 3,
   "high_confidence_cuts": 2,
   "medium_confidence_cuts": 1,
   "human_required_cuts": 10,
