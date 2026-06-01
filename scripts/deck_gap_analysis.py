@@ -56,6 +56,35 @@ TARGETS = {
 
 EARLY_CURVE_TARGET = 0.40
 
+# ── Weighted target ranges (Phase 6D) ─────────────────────────────────────────
+# These are separate from the raw TARGETS because weighted totals use a
+# different scale. A deck with 14 Engine cards at 0.65 avg weight ≈ 9.1 weighted
+# — which is inside the weighted ideal range even if raw looks inflated.
+#
+# Rough calibration: weighted ideal ≈ raw ideal × expected avg weight per role.
+# Engine cards average ~0.65 (many secondary hits) → raw ideal 10-16 → weighted ~6.5-10.4.
+# Recursion cards average ~0.90 (mostly primary) → raw ideal 6-9 → weighted ~5.4-8.1.
+#
+# Numbers are intentionally approximate. The value is in seeing which roles have
+# deep primary coverage vs thin incidental coverage.
+WEIGHTED_TARGETS: dict[str, tuple[float, float]] = {
+    "Mana_Acceleration": (8.0, 12.0),
+    "Mana_Engine":       (2.0,  5.0),
+    "Card_Draw":         (7.0, 11.0),
+    "Removal":           (8.0, 12.0),
+    "Engine":            (8.0, 14.0),
+    "Payoff":            (5.0,  9.0),
+    "Fuel":              (4.0,  7.0),
+    "Recursion":         (6.0, 10.0),
+    "Conversion":        (4.0,  7.0),
+    "Finisher":          (3.0,  6.0),
+    "Enabler":           (5.5, 10.0),
+    "Interaction":       (5.0,  8.0),
+    "Threat":            (5.0,  9.0),
+    "Setup":             (3.5,  6.5),
+    "Protection":        (2.0,  4.0),
+}
+
 # ── Role weight thresholds (Phase 6C) ─────────────────────────────────────────
 # Derived from the confidence values stored by the functional rule engine.
 # Confidence reflects how certain we are the role applies; weight reflects
@@ -359,8 +388,141 @@ def compute_weighted_roles(card_name: str, db) -> dict[str, dict]:
     return result
 
 
-def total_weighted_score(weighted_roles: dict[str, dict]) -> float:
+def functional_density_score(weighted_roles: dict[str, dict]) -> float:
+    """
+    Sum of role weights for a card. Measures functional density, not card power.
+
+    A card with one primary job (Blood Artist, score 1.65) can be more essential
+    than a card with many secondary jobs. Do not use this to rank cards by quality.
+    Use it to compare cards with similar roles or to identify incidental-heavy cards
+    that add to raw counts without adding meaningful role depth.
+    """
     return sum(v["weight"] for v in weighted_roles.values())
+
+
+def weighted_gap_status(weighted_total: float, targets: tuple[float, float]) -> str:
+    lo, hi = targets
+    if weighted_total < lo * 0.75:  return "W_CRITICAL"
+    if weighted_total < lo:          return "W_LOW"
+    if weighted_total > hi * 1.25:   return "W_HIGH"
+    if weighted_total > hi:          return "W_SLIGHTLY_HIGH"
+    return "W_OK"
+
+
+def compute_role_priority_breakdown(
+    deck_infos: list,
+    weighted_by_card: dict,
+) -> dict[str, dict]:
+    """
+    For each role in TARGETS, compute the primary/secondary/incidental card counts
+    and the weighted total.
+
+    Returns:
+        {role: {"raw": int, "weighted": float, "primary": int,
+                "secondary": int, "incidental": int, "w_status": str}}
+    """
+    breakdown: dict[str, dict] = {}
+    for role in TARGETS:
+        raw        = 0
+        weighted   = 0.0
+        primary    = 0
+        secondary  = 0
+        incidental = 0
+        for c in deck_infos:
+            wr = weighted_by_card.get(c["name"], {})
+            if role in wr:
+                raw += 1
+                info = wr[role]
+                weighted += info["weight"]
+                if info["priority"] == "primary":
+                    primary += 1
+                elif info["priority"] == "secondary":
+                    secondary += 1
+                else:
+                    incidental += 1
+        breakdown[role] = {
+            "raw":        raw,
+            "weighted":   weighted,
+            "primary":    primary,
+            "secondary":  secondary,
+            "incidental": incidental,
+            "w_status":   weighted_gap_status(weighted, WEIGHTED_TARGETS[role]),
+        }
+    return breakdown
+
+
+def compute_cut_pressure(
+    deck_infos: list,
+    weighted_by_card: dict,
+    commander: str = "",
+) -> list[dict]:
+    """
+    Rank nonland cards by how safely they can be cut to free land slots.
+
+    Score is based on:
+    - +2 per CMC above 5 (high cost = structural pressure)
+    - +1.0 if no primary roles (safest cuts)
+    - +0.5 per secondary role that is over-target
+    - -2 per primary role (harder to cut)
+    - Identity-protected and blind-spot cards are put in separate tiers.
+
+    Returns list sorted by cut_pressure DESC within each tier.
+    """
+    # Only unresolved blind spots (needs_rule) are protected — fixed blind spots
+    # (fixed_in_6B) are now properly tagged and evaluated like any other card.
+    unresolved_blind_spot_names = {
+        k.lower() for k, v in KNOWN_BLIND_SPOTS.items()
+        if v.get("status") == "needs_rule"
+    }
+    identity_names = {k.lower() for k in IDENTITY_PROTECTED}
+
+    tier1 = []   # safest: 0 primary roles, positive cut pressure
+    tier2 = []   # viable: 1+ primary roles, positive cut pressure (CMC ≥ 5)
+    tier3 = []   # protected: identity or unresolved blind spot
+
+    commander_lower = commander.lower()
+
+    for c in deck_infos:
+        if is_land(c):
+            continue
+        name_lower = c["name"].lower()
+        if commander_lower and name_lower == commander_lower:
+            continue   # never recommend cutting the commander
+        wr         = weighted_by_card.get(c["name"], {})
+        primary_count   = sum(1 for v in wr.values() if v["priority"] == "primary")
+        secondary_count = sum(1 for v in wr.values() if v["priority"] == "secondary")
+        fds             = functional_density_score(wr)
+
+        if name_lower in unresolved_blind_spot_names or name_lower in identity_names:
+            reason = "blind_spot" if name_lower in unresolved_blind_spot_names else "identity_protected"
+            tier3.append({
+                "name": c["name"], "cmc": c["cmc"],
+                "primary": primary_count, "fds": fds,
+                "reason": reason,
+            })
+            continue
+
+        pressure = 0.0
+        pressure += max(0, c["cmc"] - 5) * 2.0   # CMC penalty
+        pressure += 1.0 if primary_count == 0 else 0.0  # 0-primary bonus
+        pressure -= primary_count * 2.0             # primary-role protection
+        pressure += secondary_count * 0.3           # minor push from secondary count
+
+        entry = {
+            "name": c["name"], "cmc": c["cmc"],
+            "primary": primary_count, "secondary": secondary_count,
+            "fds": fds, "pressure": pressure,
+        }
+        if primary_count == 0 and pressure > 0:
+            tier1.append(entry)
+        elif primary_count > 0 and pressure > 0 and c["cmc"] >= 5:
+            # Tier 2: only high-CMC cards with actual structural pressure
+            tier2.append(entry)
+
+    tier1.sort(key=lambda x: (-x["pressure"], -x["cmc"]))
+    tier2.sort(key=lambda x: (-x["pressure"], -x["cmc"]))
+
+    return tier1, tier2, tier3
 
 
 # ── Collection candidate search ───────────────────────────────────────────────
@@ -412,7 +574,7 @@ def run_analysis(deck_path: str, db_path: str) -> None:
     print(f"\n{'='*60}")
     print(f"  DECK GAP ANALYSIS — {deck_name.upper()}")
     print(f"  Commander: {commander}")
-    print(f"  Phase 6C: Role Weighting + Primary Role Classification")
+    print(f"  Phase 6D: Weighted Targets + Deck Completion Planner")
     print(f"{'='*60}")
 
     db = Database(db_path)
@@ -451,6 +613,10 @@ def run_analysis(deck_path: str, db_path: str) -> None:
     for card_weighted in weighted_by_card.values():
         for role, info in card_weighted.items():
             weighted_role_totals[role] += info["weight"]
+
+    # Phase 6D: priority breakdown and cut pressure
+    role_breakdown = compute_role_priority_breakdown(deck_infos, weighted_by_card)
+    cut_tier1, cut_tier2, cut_tier3 = compute_cut_pressure(deck_infos, weighted_by_card, commander)
 
     # ── Print structural status ───────────────────────────────────────────────
     print(f"\n{'─'*60}")
@@ -524,6 +690,20 @@ def run_analysis(deck_path: str, db_path: str) -> None:
     for role, (count, (lo, id_lo, id_hi, hi), status) in excess.items():
         over = count - id_hi
         print(f"  {status:<14} {role:<22} have {count}, ideal ≤{id_hi}  (could cut ~{over})")
+
+    # ── Primary role breakdown ────────────────────────────────────────────────
+    print(f"\n{'─'*60}")
+    print("ROLE PRIORITY BREAKDOWN  (Phase 6D weighted targets)")
+    print(f"{'─'*60}")
+    print(f"  {'Role':<22} {'Primary':>7} {'Sec':>5} {'Inc':>5}  {'Wtd Total':>9}  {'Wtd Target':>12}  W-Status")
+    print(f"  {'─'*22} {'─'*7} {'─'*5} {'─'*5}  {'─'*9}  {'─'*12}  {'─'*14}")
+    for role in TARGETS:
+        bd = role_breakdown[role]
+        wt_lo, wt_hi = WEIGHTED_TARGETS[role]
+        print(
+            f"  {role:<22} {bd['primary']:>7} {bd['secondary']:>5} {bd['incidental']:>5}"
+            f"  {bd['weighted']:>9.1f}  {wt_lo:.1f}–{wt_hi:<9.1f}  {bd['w_status']}"
+        )
 
     # ── Collection candidates ─────────────────────────────────────────────────
     print(f"\n{'─'*60}")
@@ -616,6 +796,30 @@ def run_analysis(deck_path: str, db_path: str) -> None:
         else:
             print(f"  ·  {card_name:<30}  [{status}] — still 0 roles by design, in blind spots list")
 
+    # ── Completion planner ────────────────────────────────────────────────────
+    print(f"\n{'─'*60}")
+    print("COMPLETION PLANNER (Phase 6D)")
+    print(f"{'─'*60}")
+    print(f"  Add {structural['lands_needed']} lands.  Cut {structural['nonland_cuts_needed']} nonlands.")
+    print()
+    print("  Tier 1 — Safest cuts (0 primary roles, sorted by cut pressure):")
+    if cut_tier1:
+        for item in cut_tier1[:8]:
+            print(f"    CMC {item['cmc']}  {item['name']:<35}  fds={item['fds']:.2f}  pressure={item['pressure']:.1f}")
+    else:
+        print("    None. (All 0-role cards are blind spots or identity-protected.)")
+    print()
+    print("  Tier 2 — Viable cuts (1+ primary roles, only if Tier 1 exhausted):")
+    if cut_tier2:
+        for item in cut_tier2[:6]:
+            print(f"    CMC {item['cmc']}  {item['name']:<35}  primary={item['primary']}  fds={item['fds']:.2f}")
+    else:
+        print("    None.")
+    print()
+    print("  Tier 3 — Do not cut (protected):")
+    for item in cut_tier3:
+        print(f"    [{item['reason']}]  {item['name']}")
+
     # ── Write reports ─────────────────────────────────────────────────────────
     _write_structural_json(structural)
     _write_blindspots_csv()
@@ -623,10 +827,14 @@ def run_analysis(deck_path: str, db_path: str) -> None:
         deck_name, commander, deck_infos, lands, nonlands,
         avg_cmc, early_pct, role_status, gaps, excess,
         candidates_by_role, cmc_bucket, structural, cuts, weighted_role_totals,
+        role_breakdown,
     )
     _write_role_csv(deck_infos)
     _write_candidates_md(candidates_by_role)
     _write_weighted_summary_csv(deck_infos, weighted_by_card)
+    _write_weighted_role_targets_csv(role_breakdown)
+    _write_primary_role_summary_csv(role_breakdown)
+    _write_completion_plan_md(structural, cut_tier1, cut_tier2, cut_tier3, role_breakdown)
 
     print(f"\n{'─'*60}")
     print("REPORTS WRITTEN")
@@ -658,7 +866,7 @@ def _write_blindspots_csv() -> None:
 def _write_gap_report(
     name, commander, all_cards, lands, nonlands, avg_cmc, early_pct,
     role_status, gaps, excess, candidates, cmc_bucket, structural, cuts,
-    weighted_totals,
+    weighted_totals, role_breakdown,
 ):
     readiness_label = (
         "NOT READY FOR FINAL ROLE EVALUATION"
@@ -708,19 +916,27 @@ def _write_gap_report(
         "",
         f"## Role Counts vs Targets{diag_note}",
         "",
-        "Raw count = how many deck cards have this role (any priority).  ",
-        "Weighted = sum of role weights (primary=1.0, secondary=0.65, incidental=0.35).  ",
-        "Weighted is a more honest picture of role depth.",
+        "- **Raw** = cards with this role (any priority)",
+        "- **Primary** = cards where this is a primary role (weight 1.0)",
+        "- **Weighted** = sum of weights (primary=1.0, secondary=0.65, incidental=0.35)",
+        "- **W-Status** = weighted total vs weighted target range",
         "",
-        "| Role | Raw | Weighted | Ideal | Status |",
-        "|------|-----|----------|-------|--------|",
+        "| Role | Raw | Primary | Weighted | Ideal (raw) | W-Target | Status | W-Status |",
+        "|------|-----|---------|----------|-------------|----------|--------|----------|",
     ]
     for role, (count, (lo, id_lo, id_hi, hi), status) in sorted(
         role_status.items(),
         key=lambda x: ["CRITICAL", "LOW", "OK", "SLIGHTLY HIGH", "HIGH"].index(x[1][2])
     ):
-        w = weighted_totals.get(role, 0.0)
-        lines.append(f"| {role} | {count} | {w:.1f} | {id_lo}–{id_hi} | {status} |")
+        w   = weighted_totals.get(role, 0.0)
+        bd  = role_breakdown.get(role, {})
+        pri = bd.get("primary", 0)
+        wt_lo, wt_hi = WEIGHTED_TARGETS.get(role, (0, 0))
+        w_status = bd.get("w_status", "—")
+        lines.append(
+            f"| {role} | {count} | {pri} | {w:.1f} | {id_lo}–{id_hi} "
+            f"| {wt_lo:.1f}–{wt_hi:.1f} | {status} | {w_status} |"
+        )
 
     # Gaps
     lines += ["", "---", "", "## Gaps to Fill", ""]
@@ -853,7 +1069,7 @@ def _write_weighted_summary_csv(deck_infos: list, weighted_by_card: dict) -> Non
             primary   = sorted(r for r, v in weighted.items() if v["priority"] == "primary")
             secondary = sorted(r for r, v in weighted.items() if v["priority"] == "secondary")
             incidental = sorted(r for r, v in weighted.items() if v["priority"] == "incidental")
-            score = total_weighted_score(weighted)
+            score = functional_density_score(weighted)
             w.writerow([
                 c["name"], c["cmc"], "yes" if is_land(c) else "no",
                 "; ".join(primary),
@@ -862,6 +1078,184 @@ def _write_weighted_summary_csv(deck_infos: list, weighted_by_card: dict) -> Non
                 f"{score:.2f}",
                 len(c["func"]),
             ])
+
+
+def _write_weighted_role_targets_csv(role_breakdown: dict) -> None:
+    """
+    Write per-role weighted breakdown with weighted target comparison.
+
+    Columns: role, raw_count, weighted_total, primary_count, secondary_count,
+             incidental_count, weighted_target_lo, weighted_target_hi, w_status
+    """
+    with open(REPORTS / "weighted_role_targets.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow([
+            "role", "raw_count", "weighted_total",
+            "primary_count", "secondary_count", "incidental_count",
+            "weighted_target_lo", "weighted_target_hi", "w_status",
+        ])
+        for role in TARGETS:
+            bd = role_breakdown[role]
+            wt_lo, wt_hi = WEIGHTED_TARGETS[role]
+            w.writerow([
+                role, bd["raw"], f"{bd['weighted']:.2f}",
+                bd["primary"], bd["secondary"], bd["incidental"],
+                wt_lo, wt_hi, bd["w_status"],
+            ])
+
+
+def _write_primary_role_summary_csv(role_breakdown: dict) -> None:
+    """
+    Write a clean primary-role summary. Easier to read than the full targets CSV.
+
+    Columns: role, primary_count, secondary_count, incidental_count,
+             weighted_total, w_status
+    """
+    with open(REPORTS / "primary_role_summary.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow([
+            "role", "primary_count", "secondary_count", "incidental_count",
+            "weighted_total", "w_status",
+        ])
+        for role in sorted(TARGETS):
+            bd = role_breakdown[role]
+            w.writerow([
+                role, bd["primary"], bd["secondary"], bd["incidental"],
+                f"{bd['weighted']:.2f}", bd["w_status"],
+            ])
+
+
+def _write_completion_plan_md(
+    structural: dict,
+    tier1: list, tier2: list, tier3: list,
+    role_breakdown: dict,
+) -> None:
+    """
+    Write a deck completion plan: how many lands to add, which nonlands are
+    cut candidates (and in what order), preserving primary-role density.
+    """
+    lands_needed = structural["lands_needed"]
+    cuts_needed  = structural["nonland_cuts_needed"]
+
+    lines = [
+        "# Deck Completion Plan",
+        "",
+        "## Structural Gap",
+        "",
+        f"| Metric | Current | Target |",
+        f"|--------|---------|--------|",
+        f"| Deck size | {structural['deck_size']} | {structural['deck_size_target']} |",
+        f"| Lands | {structural['land_count']} | {structural['land_target_min']}–{structural['land_target_max']} |",
+        f"| Lands to add | {lands_needed} | — |",
+        f"| Nonlands to cut | ~{cuts_needed} | — |",
+        "",
+        "---",
+        "",
+        "## Role Depth After Cuts (projected)",
+        "",
+        "The deck currently has no primary-role gaps. After cutting ~" + str(cuts_needed) + " nonlands:",
+        "- Roles where coverage is **primary-heavy** survive cuts well.",
+        "- Roles where coverage is **incidental-heavy** may actually improve (less noise).",
+        "",
+        "Roles with low primary coverage — protect these:",
+        "",
+    ]
+
+    low_primary = [
+        (role, bd) for role, bd in role_breakdown.items()
+        if bd["primary"] <= 2 and bd["raw"] > 0
+    ]
+    low_primary.sort(key=lambda x: x[1]["primary"])
+    for role, bd in low_primary:
+        lines.append(
+            f"- **{role}**: {bd['primary']} primary cards"
+            f" (weighted {bd['weighted']:.1f} — target {WEIGHTED_TARGETS[role][0]:.1f}–{WEIGHTED_TARGETS[role][1]:.1f})"
+        )
+
+    lines += [
+        "",
+        "---",
+        "",
+        "## Cut Priority Order",
+        "",
+        f"Need to free ~{cuts_needed} nonland slots for lands.",
+        "Listed by cut pressure. Cut from Tier 1 first.",
+        "",
+        "### Tier 1 — Safest cuts (0 primary roles)",
+        "",
+        "These cards contribute only secondary/incidental role depth.",
+        "The deck absorbs these cuts with minimal role impact.",
+        "",
+    ]
+
+    if tier1:
+        lines.append("| Card | CMC | Functional density | Cut pressure |")
+        lines.append("|------|-----|--------------------|--------------|")
+        for item in tier1:
+            lines.append(
+                f"| {item['name']} | {item['cmc']} "
+                f"| {item['fds']:.2f} | {item['pressure']:.1f} |"
+            )
+    else:
+        lines.append("None. (All 0-role cards are in the protected lists.)")
+
+    lines += [
+        "",
+        "### Tier 2 — Viable cuts (1+ primary roles)",
+        "",
+        "Only cut from here if Tier 1 is exhausted.",
+        "Each cut removes some primary-role coverage — evaluate impact before cutting.",
+        "",
+    ]
+
+    if tier2:
+        lines.append("| Card | CMC | Primary roles | Functional density |")
+        lines.append("|------|-----|---------------|--------------------|")
+        for item in tier2[:10]:
+            lines.append(
+                f"| {item['name']} | {item['cmc']} "
+                f"| {item['primary']} | {item['fds']:.2f} |"
+            )
+    else:
+        lines.append("None.")
+
+    lines += [
+        "",
+        "### Tier 3 — Do not cut (protected)",
+        "",
+        "Identity-protected cards define how the deck feels.",
+        "Parser blind spots need rule fixes before evaluation.",
+        "",
+    ]
+
+    if tier3:
+        lines.append("| Card | Reason |")
+        lines.append("|------|--------|")
+        for item in tier3:
+            lines.append(f"| {item['name']} | {item['reason']} |")
+    else:
+        lines.append("None.")
+
+    lines += [
+        "",
+        "---",
+        "",
+        "## Land Recommendations",
+        "",
+        "Add ~" + str(lands_needed) + " lands. Suggested composition:",
+        "",
+        "- 15–18 basic Swamps (reliable, no downside)",
+        "- Cabal Coffers + Urborg, Tomb of Yawgmoth (big mana payoff)",
+        "- Crypt of Agadeem (already in deck)",
+        "- 4–6 utility lands: High Market (already in), Phyrexian Tower,",
+        "  Cabal Stronghold, Nykthos (devotion), Castle Locthwain",
+        "- 3–4 fetch/fixing lands for graveyard synergy or color reliability",
+        "",
+        "> Land recommendations are suggestions only. Final selection should",
+        "> respect your collection, play style, and budget.",
+    ]
+
+    (REPORTS / "completion_plan.md").write_text("\n".join(lines))
 
 
 def _write_role_csv(deck_infos):

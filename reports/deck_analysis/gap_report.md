@@ -31,27 +31,28 @@ Reasons:
 
 ## Role Counts vs Targets *(Diagnostic only)*
 
-Raw count = how many deck cards have this role (any priority).  
-Weighted = sum of role weights (primary=1.0, secondary=0.65, incidental=0.35).  
-Weighted is a more honest picture of role depth.
+- **Raw** = cards with this role (any priority)
+- **Primary** = cards where this is a primary role (weight 1.0)
+- **Weighted** = sum of weights (primary=1.0, secondary=0.65, incidental=0.35)
+- **W-Status** = weighted total vs weighted target range
 
-| Role | Raw | Weighted | Ideal | Status |
-|------|-----|----------|-------|--------|
-| Finisher | 5 | 3.9 | 3–6 | OK |
-| Setup | 6 | 5.7 | 4–7 | OK |
-| Protection | 2 | 2.0 | 2–4 | OK |
-| Mana_Acceleration | 16 | 11.2 | 11–14 | SLIGHTLY HIGH |
-| Card_Draw | 14 | 10.9 | 9–12 | SLIGHTLY HIGH |
-| Mana_Engine | 7 | 6.0 | 2–4 | HIGH |
-| Removal | 15 | 11.9 | 9–12 | HIGH |
-| Engine | 28 | 18.2 | 10–16 | HIGH |
-| Payoff | 20 | 14.4 | 6–10 | HIGH |
-| Fuel | 15 | 8.0 | 5–8 | HIGH |
-| Recursion | 16 | 15.3 | 6–9 | HIGH |
-| Conversion | 20 | 12.3 | 5–8 | HIGH |
-| Enabler | 32 | 21.1 | 7–12 | HIGH |
-| Interaction | 14 | 10.9 | 6–9 | HIGH |
-| Threat | 16 | 10.8 | 6–10 | HIGH |
+| Role | Raw | Primary | Weighted | Ideal (raw) | W-Target | Status | W-Status |
+|------|-----|---------|----------|-------------|----------|--------|----------|
+| Finisher | 5 | 2 | 3.9 | 3–6 | 3.0–6.0 | OK | W_OK |
+| Setup | 6 | 5 | 5.7 | 4–7 | 3.5–6.5 | OK | W_OK |
+| Protection | 2 | 2 | 2.0 | 2–4 | 2.0–4.0 | OK | W_OK |
+| Mana_Acceleration | 16 | 3 | 11.2 | 11–14 | 8.0–12.0 | SLIGHTLY HIGH | W_OK |
+| Card_Draw | 14 | 5 | 10.9 | 9–12 | 7.0–11.0 | SLIGHTLY HIGH | W_OK |
+| Mana_Engine | 7 | 4 | 6.0 | 2–4 | 2.0–5.0 | HIGH | W_SLIGHTLY_HIGH |
+| Removal | 15 | 7 | 11.9 | 9–12 | 8.0–12.0 | HIGH | W_OK |
+| Engine | 28 | 6 | 18.2 | 10–16 | 8.0–14.0 | HIGH | W_HIGH |
+| Payoff | 20 | 4 | 14.4 | 6–10 | 5.0–9.0 | HIGH | W_HIGH |
+| Fuel | 15 | 0 | 8.0 | 5–8 | 4.0–7.0 | HIGH | W_SLIGHTLY_HIGH |
+| Recursion | 16 | 14 | 15.3 | 6–9 | 6.0–10.0 | HIGH | W_HIGH |
+| Conversion | 20 | 5 | 12.3 | 5–8 | 4.0–7.0 | HIGH | W_HIGH |
+| Enabler | 32 | 1 | 21.1 | 7–12 | 5.5–10.0 | HIGH | W_HIGH |
+| Interaction | 14 | 5 | 10.9 | 6–9 | 5.0–8.0 | HIGH | W_HIGH |
+| Threat | 16 | 1 | 10.8 | 6–10 | 5.0–9.0 | HIGH | W_SLIGHTLY_HIGH |
 
 ---
 
@@ -93,13 +94,13 @@ Logic: CMC 6+ and at least one over-represented role.
 
 | Card | CMC | Over-represented roles |
 |------|-----|------------------------|
-| Archon of Cruelty | 8 | Card_Draw, Threat, Removal, Engine, Payoff, Interaction |
-| Butcher of Malakir | 7 | Threat, Engine, Removal, Interaction |
-| Overseer of the Damned | 7 | Removal, Interaction |
+| Archon of Cruelty | 8 | Removal, Engine, Interaction, Threat, Payoff, Card_Draw |
+| Butcher of Malakir | 7 | Interaction, Removal, Engine, Threat |
+| Overseer of the Damned | 7 | Interaction, Removal |
 | Rune-Scarred Demon | 7 | Enabler |
-| Sheoldred, Whispering One | 7 | Engine, Threat, Recursion, Removal, Enabler, Interaction |
+| Sheoldred, Whispering One | 7 | Removal, Engine, Enabler, Interaction, Threat, Recursion |
 | Grave Titan | 6 | Threat, Payoff, Fuel |
-| Nirkana Revenant | 6 | Mana_Engine, Mana_Acceleration |
+| Nirkana Revenant | 6 | Mana_Acceleration, Mana_Engine |
 
 ### C. Parser Blind Spots
 
