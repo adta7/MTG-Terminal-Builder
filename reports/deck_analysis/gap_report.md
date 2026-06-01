@@ -29,26 +29,29 @@ Reasons:
 
 ---
 
-## Role Counts vs Targets
-(Diagnostic only)
+## Role Counts vs Targets *(Diagnostic only)*
 
-| Role | Have | Ideal | Status |
-|------|------|-------|--------|
-| Finisher | 5 | 3–6 | OK |
-| Setup | 6 | 4–7 | OK |
-| Protection | 2 | 2–4 | OK |
-| Mana_Acceleration | 16 | 11–14 | SLIGHTLY HIGH |
-| Card_Draw | 14 | 9–12 | SLIGHTLY HIGH |
-| Mana_Engine | 7 | 2–4 | HIGH |
-| Removal | 15 | 9–12 | HIGH |
-| Engine | 28 | 10–16 | HIGH |
-| Payoff | 20 | 6–10 | HIGH |
-| Fuel | 15 | 5–8 | HIGH |
-| Recursion | 16 | 6–9 | HIGH |
-| Conversion | 20 | 5–8 | HIGH |
-| Enabler | 32 | 7–12 | HIGH |
-| Interaction | 14 | 6–9 | HIGH |
-| Threat | 16 | 6–10 | HIGH |
+Raw count = how many deck cards have this role (any priority).  
+Weighted = sum of role weights (primary=1.0, secondary=0.65, incidental=0.35).  
+Weighted is a more honest picture of role depth.
+
+| Role | Raw | Weighted | Ideal | Status |
+|------|-----|----------|-------|--------|
+| Finisher | 5 | 3.9 | 3–6 | OK |
+| Setup | 6 | 5.7 | 4–7 | OK |
+| Protection | 2 | 2.0 | 2–4 | OK |
+| Mana_Acceleration | 16 | 11.2 | 11–14 | SLIGHTLY HIGH |
+| Card_Draw | 14 | 10.9 | 9–12 | SLIGHTLY HIGH |
+| Mana_Engine | 7 | 6.0 | 2–4 | HIGH |
+| Removal | 15 | 11.9 | 9–12 | HIGH |
+| Engine | 28 | 18.2 | 10–16 | HIGH |
+| Payoff | 20 | 14.4 | 6–10 | HIGH |
+| Fuel | 15 | 8.0 | 5–8 | HIGH |
+| Recursion | 16 | 15.3 | 6–9 | HIGH |
+| Conversion | 20 | 12.3 | 5–8 | HIGH |
+| Enabler | 32 | 21.1 | 7–12 | HIGH |
+| Interaction | 14 | 10.9 | 6–9 | HIGH |
+| Threat | 16 | 10.8 | 6–10 | HIGH |
 
 ---
 
@@ -90,12 +93,12 @@ Logic: CMC 6+ and at least one over-represented role.
 
 | Card | CMC | Over-represented roles |
 |------|-----|------------------------|
-| Archon of Cruelty | 8 | Engine, Threat, Interaction, Removal, Payoff, Card_Draw |
-| Butcher of Malakir | 7 | Threat, Engine, Interaction, Removal |
-| Overseer of the Damned | 7 | Interaction, Removal |
+| Archon of Cruelty | 8 | Card_Draw, Threat, Removal, Engine, Payoff, Interaction |
+| Butcher of Malakir | 7 | Threat, Engine, Removal, Interaction |
+| Overseer of the Damned | 7 | Removal, Interaction |
 | Rune-Scarred Demon | 7 | Enabler |
-| Sheoldred, Whispering One | 7 | Engine, Recursion, Enabler, Threat, Interaction, Removal |
-| Grave Titan | 6 | Payoff, Threat, Fuel |
+| Sheoldred, Whispering One | 7 | Engine, Threat, Recursion, Removal, Enabler, Interaction |
+| Grave Titan | 6 | Threat, Payoff, Fuel |
 | Nirkana Revenant | 6 | Mana_Engine, Mana_Acceleration |
 
 ### C. Parser Blind Spots

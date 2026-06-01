@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """
-deck_gap_analysis.py — Phase 6B: Structural Deck Diagnostics
+deck_gap_analysis.py — Phase 6C: Role Weighting + Primary Role Classification
 
-Answers: "Is this deck structurally playable before I evaluate card quality?"
+Answers:
+  6B: "Is this deck structurally playable before I evaluate card quality?"
+  6C: "How important is each role on each card — primary, secondary, or incidental?"
 
 Produces:
-  reports/deck_analysis/gap_report.md          — full diagnostic report
-  reports/deck_analysis/role_counts.csv        — per-card tag data
-  reports/deck_analysis/candidates.md          — collection matches for gaps
-  reports/deck_analysis/structural_summary.json — machine-readable readiness status
-  reports/deck_analysis/pattern_blindspots.csv  — cards the parser doesn't understand yet
+  reports/deck_analysis/gap_report.md             — full diagnostic report
+  reports/deck_analysis/role_counts.csv           — per-card tag data
+  reports/deck_analysis/candidates.md             — collection matches for gaps
+  reports/deck_analysis/structural_summary.json   — machine-readable readiness status
+  reports/deck_analysis/pattern_blindspots.csv    — cards the parser doesn't understand yet
+  reports/deck_analysis/weighted_role_summary.csv — per-card weighted role breakdown
 
 Usage:
   python scripts/deck_gap_analysis.py [--deck PATH] [--db PATH]
@@ -52,6 +55,73 @@ TARGETS = {
 }
 
 EARLY_CURVE_TARGET = 0.40
+
+# ── Role weight thresholds (Phase 6C) ─────────────────────────────────────────
+# Derived from the confidence values stored by the functional rule engine.
+# Confidence reflects how certain we are the role applies; weight reflects
+# how central the role is to why you'd play this card.
+#
+# Thresholds are intentionally conservative: only roles at ≥ 0.88 confidence
+# become "primary" automatically. Cards with all roles clustering at 0.75-0.85
+# (like Archon of Cruelty) need manual overrides to identify their real purpose.
+PRIMARY_THRESHOLD   = 0.88
+SECONDARY_THRESHOLD = 0.70
+
+PRIMARY_WEIGHT   = 1.00
+SECONDARY_WEIGHT = 0.65
+INCIDENTAL_WEIGHT = 0.35
+
+# ── Manual role weight overrides ──────────────────────────────────────────────
+# For cards where auto-classification from confidence is wrong.
+# The FUNCTIONAL_RULES confidence reflects "how certain is this role" —
+# NOT "how central is this role to why you play the card."
+# Archon of Cruelty is the canonical example: all roles cluster at 0.75-0.85
+# (all legitimately apply), but Threat is the PRIMARY reason to cast it.
+#
+# Keys are exact card names. Only roles the card already has can be overridden.
+# Do not add roles the rule engine didn't derive — that would be misleading.
+MANUAL_ROLE_WEIGHTS: dict[str, dict[str, dict]] = {
+    "Archon of Cruelty": {
+        # 8-mana flyer that demands an answer — everything else is ETB bonus
+        "Threat":         {"priority": "primary",    "weight": PRIMARY_WEIGHT},
+        "Card_Draw":      {"priority": "secondary",  "weight": SECONDARY_WEIGHT},
+        "Removal":        {"priority": "secondary",  "weight": SECONDARY_WEIGHT},
+        "Payoff":         {"priority": "secondary",  "weight": SECONDARY_WEIGHT},
+        "Interaction":    {"priority": "secondary",  "weight": SECONDARY_WEIGHT},
+        "Card_Advantage": {"priority": "incidental", "weight": INCIDENTAL_WEIGHT},
+        "Engine":         {"priority": "incidental", "weight": INCIDENTAL_WEIGHT},
+    },
+    "Ashnod's Altar": {
+        # Sacrifice outlet first, then mana engine — Enabler is the core role
+        "Enabler":          {"priority": "primary", "weight": PRIMARY_WEIGHT},
+        "Engine":           {"priority": "primary", "weight": PRIMARY_WEIGHT},
+        "Conversion":       {"priority": "primary", "weight": PRIMARY_WEIGHT},
+        "Mana_Engine":      {"priority": "primary", "weight": PRIMARY_WEIGHT},
+        "Mana_Acceleration":{"priority": "secondary", "weight": SECONDARY_WEIGHT},
+    },
+    "Black Market": {
+        # Mana engine that scales with deaths — slow, but the primary purpose IS big mana
+        "Engine":            {"priority": "primary", "weight": PRIMARY_WEIGHT},
+        "Mana_Engine":       {"priority": "primary", "weight": PRIMARY_WEIGHT},
+        "Mana_Acceleration": {"priority": "primary", "weight": PRIMARY_WEIGHT},
+        "Payoff":            {"priority": "secondary", "weight": SECONDARY_WEIGHT},
+        "Conversion":        {"priority": "secondary", "weight": SECONDARY_WEIGHT},
+    },
+    "Gray Merchant of Asphodel": {
+        # Gary is an ETB finisher — Payoff is primary, Threat is secondary
+        "Finisher": {"priority": "primary",   "weight": PRIMARY_WEIGHT},
+        "Payoff":   {"priority": "primary",   "weight": PRIMARY_WEIGHT},
+        "Threat":   {"priority": "secondary", "weight": SECONDARY_WEIGHT},
+    },
+    "Skullclamp": {
+        # Card draw engine — everything else is incidental to the draw loop
+        "Card_Draw":      {"priority": "primary",    "weight": PRIMARY_WEIGHT},
+        "Card_Advantage": {"priority": "secondary",  "weight": SECONDARY_WEIGHT},
+        "Payoff":         {"priority": "secondary",  "weight": SECONDARY_WEIGHT},
+        "Engine":         {"priority": "secondary",  "weight": SECONDARY_WEIGHT},
+        "Conversion":     {"priority": "incidental", "weight": INCIDENTAL_WEIGHT},
+    },
+}
 
 PRIORITY_GAPS = [
     "Card_Draw", "Fuel", "Mana_Acceleration", "Removal",
@@ -252,6 +322,47 @@ def classify_cut_candidates(deck_infos: list, role_status: dict) -> dict:
     }
 
 
+# ── Role weighting (Phase 6C) ─────────────────────────────────────────────────
+
+def compute_weighted_roles(card_name: str, db) -> dict[str, dict]:
+    """
+    Compute weighted roles for a single card.
+
+    Weight is derived from the confidence stored by the functional rule engine,
+    then adjusted by MANUAL_ROLE_WEIGHTS for cards where auto-classification
+    doesn't reflect the card's real purpose.
+
+    Returns:
+        {role_name: {"priority": "primary"|"secondary"|"incidental",
+                     "weight": float, "confidence": float}}
+    """
+    func_tags = db.get_card_tags(card_name, layer="functional")
+    result: dict[str, dict] = {}
+
+    for tag in func_tags:
+        role = tag["name"]
+        conf = tag["confidence"]
+        if conf >= PRIMARY_THRESHOLD:
+            priority, weight = "primary", PRIMARY_WEIGHT
+        elif conf >= SECONDARY_THRESHOLD:
+            priority, weight = "secondary", SECONDARY_WEIGHT
+        else:
+            priority, weight = "incidental", INCIDENTAL_WEIGHT
+        result[role] = {"priority": priority, "weight": weight, "confidence": conf}
+
+    # Apply manual overrides — only for roles the rule engine already derived.
+    # We never ADD roles here; that would bypass the honest gap-tracking.
+    for role, override in MANUAL_ROLE_WEIGHTS.get(card_name, {}).items():
+        if role in result:
+            result[role].update(override)
+
+    return result
+
+
+def total_weighted_score(weighted_roles: dict[str, dict]) -> float:
+    return sum(v["weight"] for v in weighted_roles.values())
+
+
 # ── Collection candidate search ───────────────────────────────────────────────
 
 def find_candidates(db, role: str, deck_names: set[str], limit: int = 8) -> list[dict]:
@@ -301,7 +412,7 @@ def run_analysis(deck_path: str, db_path: str) -> None:
     print(f"\n{'='*60}")
     print(f"  DECK GAP ANALYSIS — {deck_name.upper()}")
     print(f"  Commander: {commander}")
-    print(f"  Phase 6B: Structural Deck Diagnostics")
+    print(f"  Phase 6C: Role Weighting + Primary Role Classification")
     print(f"{'='*60}")
 
     db = Database(db_path)
@@ -329,6 +440,17 @@ def run_analysis(deck_path: str, db_path: str) -> None:
     early_pct    = early_count / len(nonlands) if nonlands else 0
 
     structural = compute_structural_status(len(deck_cards_raw), len(lands))
+
+    # Compute weighted roles for each card (Phase 6C)
+    weighted_by_card: dict[str, dict] = {}
+    for c in deck_infos:
+        weighted_by_card[c["name"]] = compute_weighted_roles(c["name"], db)
+
+    # Weighted deck-level counts: sum of weights for each role across all cards
+    weighted_role_totals: dict[str, float] = defaultdict(float)
+    for card_weighted in weighted_by_card.values():
+        for role, info in card_weighted.items():
+            weighted_role_totals[role] += info["weight"]
 
     # ── Print structural status ───────────────────────────────────────────────
     print(f"\n{'─'*60}")
@@ -374,12 +496,14 @@ def run_analysis(deck_path: str, db_path: str) -> None:
         "ROLE COUNTS"
     print(label)
     print(f"{'─'*60}")
+    print(f"  {'Role':<22} {'Raw':>4}  {'Weighted':>8}  {'Ideal range':<12}  Status")
+    print(f"  {'─'*22} {'─'*4}  {'─'*8}  {'─'*12}  {'─'*14}")
     for role in TARGETS:
         count, targets, status = role_status[role]
         lo, id_lo, id_hi, hi = targets
+        w_total = weighted_role_totals.get(role, 0.0)
         icon = "⚠ " if status in ("CRITICAL", "LOW") else ("→ " if status in ("HIGH", "SLIGHTLY HIGH") else "✓ ")
-        bar  = "█" * count
-        print(f"  {icon}{role:<22} {count:>3}  (ideal {id_lo}–{id_hi})  {bar}")
+        print(f"  {icon}{role:<22} {count:>4}  {w_total:>8.1f}  {id_lo}–{id_hi:<10}  {status}")
 
     # ── Print gaps ────────────────────────────────────────────────────────────
     print(f"\n{'─'*60}")
@@ -498,10 +622,11 @@ def run_analysis(deck_path: str, db_path: str) -> None:
     _write_gap_report(
         deck_name, commander, deck_infos, lands, nonlands,
         avg_cmc, early_pct, role_status, gaps, excess,
-        candidates_by_role, cmc_bucket, structural, cuts,
+        candidates_by_role, cmc_bucket, structural, cuts, weighted_role_totals,
     )
     _write_role_csv(deck_infos)
     _write_candidates_md(candidates_by_role)
+    _write_weighted_summary_csv(deck_infos, weighted_by_card)
 
     print(f"\n{'─'*60}")
     print("REPORTS WRITTEN")
@@ -533,6 +658,7 @@ def _write_blindspots_csv() -> None:
 def _write_gap_report(
     name, commander, all_cards, lands, nonlands, avg_cmc, early_pct,
     role_status, gaps, excess, candidates, cmc_bucket, structural, cuts,
+    weighted_totals,
 ):
     readiness_label = (
         "NOT READY FOR FINAL ROLE EVALUATION"
@@ -576,20 +702,25 @@ def _write_gap_report(
             "",
         ]
 
+    diag_note = " *(Diagnostic only)*" if not structural["role_counts_are_final"] else ""
     lines += [
         "---",
         "",
-        "## Role Counts vs Targets",
-        f"{'(Diagnostic only)' if not structural['role_counts_are_final'] else ''}",
+        f"## Role Counts vs Targets{diag_note}",
         "",
-        "| Role | Have | Ideal | Status |",
-        "|------|------|-------|--------|",
+        "Raw count = how many deck cards have this role (any priority).  ",
+        "Weighted = sum of role weights (primary=1.0, secondary=0.65, incidental=0.35).  ",
+        "Weighted is a more honest picture of role depth.",
+        "",
+        "| Role | Raw | Weighted | Ideal | Status |",
+        "|------|-----|----------|-------|--------|",
     ]
     for role, (count, (lo, id_lo, id_hi, hi), status) in sorted(
         role_status.items(),
         key=lambda x: ["CRITICAL", "LOW", "OK", "SLIGHTLY HIGH", "HIGH"].index(x[1][2])
     ):
-        lines.append(f"| {role} | {count} | {id_lo}–{id_hi} | {status} |")
+        w = weighted_totals.get(role, 0.0)
+        lines.append(f"| {role} | {count} | {w:.1f} | {id_lo}–{id_hi} | {status} |")
 
     # Gaps
     lines += ["", "---", "", "## Gaps to Fill", ""]
@@ -697,6 +828,40 @@ def _write_gap_report(
         lines.append(f"| {card} | {expected} | {info['suspected_gap']} | `{info['status']}` |")
 
     (REPORTS / "gap_report.md").write_text("\n".join(lines))
+
+
+def _write_weighted_summary_csv(deck_infos: list, weighted_by_card: dict) -> None:
+    """
+    Write per-card weighted role breakdown.
+
+    Columns:
+      card_name, mana_value, primary_roles, secondary_roles, incidental_roles,
+      total_weighted_score, raw_role_count
+
+    total_weighted_score = sum(weight for each role). Lets you rank cards by
+    functional density rather than raw role count.
+    """
+    with open(REPORTS / "weighted_role_summary.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow([
+            "card_name", "mana_value", "is_land",
+            "primary_roles", "secondary_roles", "incidental_roles",
+            "total_weighted_score", "raw_role_count",
+        ])
+        for c in sorted(deck_infos, key=lambda x: x["name"]):
+            weighted = weighted_by_card.get(c["name"], {})
+            primary   = sorted(r for r, v in weighted.items() if v["priority"] == "primary")
+            secondary = sorted(r for r, v in weighted.items() if v["priority"] == "secondary")
+            incidental = sorted(r for r, v in weighted.items() if v["priority"] == "incidental")
+            score = total_weighted_score(weighted)
+            w.writerow([
+                c["name"], c["cmc"], "yes" if is_land(c) else "no",
+                "; ".join(primary),
+                "; ".join(secondary),
+                "; ".join(incidental),
+                f"{score:.2f}",
+                len(c["func"]),
+            ])
 
 
 def _write_role_csv(deck_infos):
