@@ -7,9 +7,12 @@ A personal Magic: The Gathering deckbuilding workstation that runs entirely in t
 - **Deck manager** — create, edit, import, delete, and copy decks interactively
 - **Card lookup** — search any card, see it rendered as a real MTG card layout with tags displayed alongside
 - **Collection pipeline** — enrich a collection CSV with full Scryfall data
-- **Deck analysis** — count lands, mana curve, type breakdown, role distribution
+- **Deck analysis** — count lands, mana curve, type breakdown, weighted role distribution
 - **Commander validation** — check deck size, color identity legality, banned cards
 - **Card tagging** — five-layer mechanical ontology auto-tags cards from oracle text
+- **Deck completion planner** — identifies structural gaps, models cuts needed, ranks candidates
+- **Preference-weighted cut review** — re-ranks cut candidates based on your deck identity priorities
+- **Interactive cut CLI** — prompts for preference levels and regenerates the cut review without editing code
 
 Everything is keyboard-driven, no browser or GUI needed.
 
@@ -39,6 +42,12 @@ python -m mtgdeck
 python -m mtgdeck                     # Launch interactive app
 python -m mtgdeck setup               # Initialize / re-index card database
 python -m mtgdeck analyze <deck>      # Analyze a deck and print report
+
+# Deckbuilding analysis pipeline (generates all 13 reports):
+python scripts/deck_gap_analysis.py
+
+# Interactive preference-weighted cut review:
+python scripts/interactive_cut_review.py
 ```
 
 ---
@@ -56,18 +65,31 @@ mtg-pipeline-terminal/
 │   ├── parser.py         # Decklist import (plain text, set codes, inline tags)
 │   ├── rules.py          # Commander legality validation
 │   ├── analyzer.py       # Deck stats, mana curve, role counts, filter queries
-│   └── tags.py           # Five-layer mechanical tagging system
+│   └── tags.py           # Five-layer mechanical tagging + functional rule engine
+├── scripts/
+│   ├── deck_gap_analysis.py      # Full deckbuilding analysis pipeline (13 outputs)
+│   ├── interactive_cut_review.py # Interactive preference-weighted cut CLI
+│   ├── scan_collection.py        # Collection scanner
+│   └── tag_deck.py               # Tag a deck in the collection DB
 ├── data/
-│   ├── cards.sqlite      # Scryfall card database (built by setup)
-│   └── decks/            # Saved deck JSON files
+│   ├── cards.sqlite              # Scryfall card database (built by setup)
+│   ├── collection_scan.sqlite    # Collection + deck analysis database
+│   └── decks/                    # Saved deck JSON files
+├── reports/deck_analysis/        # Generated on each analysis run
+│   ├── gap_report.md             # Role counts, weighted targets, cut candidates
+│   ├── weighted_role_summary.csv # Per-card primary/secondary/incidental roles
+│   ├── completion_plan.md        # Structural cut path with verdict bands
+│   ├── deck_completion_simulation.md/.json  # Cut path with model confidence
+│   └── preference_cut_review.md/.json       # Preference-adjusted Tier 2 ranking
 ├── tests/
-│   ├── test_analyzer.py
-│   ├── test_parser.py
-│   ├── test_rules.py
-│   └── test_tags.py
+│   ├── test_phase6_patterns.py   # Pattern regression tests (Phase 6B/6G)
+│   ├── test_structural_status.py # Structural readiness math tests
+│   ├── test_cut_verdicts.py      # Cut verdict band and model confidence tests
+│   ├── test_report_outputs.py    # Integration: all 13 reports generated correctly
+│   ├── test_interactive_cut_review.py  # Weight conversion and label tests
+│   └── (pre-existing tests)
 ├── mtg.py                # Original interactive terminal app (still works)
 ├── pyproject.toml
-├── requirements.txt
 ├── CHANGELOG.md
 ├── LEARN.md
 └── userPreferences.md    # Personal deckbuilding philosophy
@@ -113,10 +135,18 @@ Tags are displayed in a color-coded column to the right of the card frame during
 ## Running Tests
 
 ```bash
+# Full suite (560 tests):
 python -m pytest tests/ -q
+
+# Quick regression check (pattern fixes + cut logic):
+python -m pytest tests/test_phase6_patterns.py tests/test_cut_verdicts.py
+
+# Integration test (runs the full analysis, checks all 13 report files):
+python -m pytest tests/test_report_outputs.py
 ```
 
-113 tests covering the parser, analyzer, rules engine, and tag system.
+560 tests covering the parser, analyzer, rules engine, tag system, structural math,
+cut verdict bands, report integrity, and interactive CLI helpers.
 
 ---
 

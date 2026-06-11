@@ -4,6 +4,100 @@ Personal lessons, discoveries, and notes from building this project.
 
 ---
 
+## 2026-06-10 — Phases 6B–9: Deckbuilding Decision Support
+
+### What We Built
+
+Evolved the backend from a card tagging system into a full deckbuilding decision-support
+system. The pipeline now produces 13 report files, has a preference-weighted interactive
+CLI, and has 560 regression tests.
+
+### Architecture Notes
+
+**Confidence vs importance are different things.**
+The functional rule engine assigns confidence values (0.65–0.95) that mean "how certain
+are we that this role applies?" This is NOT the same as "how central is this role to why
+you play the card?" Archon of Cruelty has Card_Draw at 0.85 confidence (correct — it does
+draw cards) but Threat should be its primary role. The primary-role system (Phase 6C–6E)
+separates these two questions. Keep them separate going forward.
+
+**Build two opposing forces, not one score.**
+The cut planner (Phase 6F) works because it has two forces: `cut_pressure` (why to remove)
+and `cut_cost` (what the deck loses). A single ranking collapses this into noise. Any
+recommendation system should model the tradeoff explicitly, not try to reduce it to one
+number.
+
+**Name your profile, not your defaults.**
+`DEFAULT_PREFERENCES` with no name is dangerous — future analysis on a different deck will
+inherit these weights silently. Naming it `sheoldred_recursive_sacrifice_midrange` makes it
+clear these weights are identity-specific, not universal. When you build a Gisa deck or a
+Braids deck, create a new named profile dict.
+
+**0-role cards are not bad cards. They are parser gaps.**
+Phase 6B discovered this: Tragic Slip, Dance of the Dead, Victimize all had 0 functional
+roles — not because they were bad, but because the oracle text patterns didn't cover their
+specific phrasings. The `KNOWN_BLIND_SPOTS` pattern is reusable: before marking a 0-role
+card as a cut, always ask "does the parser understand what this card does?"
+
+**Test before adding UI.**
+Phase T1 was done immediately before building the interactive CLI (Phase 9). This was the
+right call. With 560 tests in place, any future change to the tag engine, structural math,
+or cut model will fail fast. Without those tests, a UI bug and a logic bug look identical.
+
+**The backend should say where its confidence ends.**
+`deck_completion_simulation.json` has `complete_confident_path_available: false` and
+`warning: "This model cannot complete the final deck..."`. This is the right design for any
+AI-adjacent tool — state your limits explicitly rather than paper over them with output.
+
+### Mistakes / Fixes
+
+**Primary threshold too strict (Phase 6E regression).**
+Setting `PRIMARY_THRESHOLD = 0.88` was correct for Archon but caused all aristocrats-specific
+cards (Grave Pact, Pitiless Plunderer, Grave Titan) to have 0 primary roles. Fix: add
+`PRIMARY_ROLE_OVERRIDES` for archetype-specific promotions. The threshold stays at 0.88 for
+auto-classification; the override layer handles archetype knowledge.
+
+**`needs_role_review` threshold too low (Phase 6G).**
+Setting `ROLE_REVIEW_FDS_THRESHOLD = 1.0` put pure draw spells (Read the Bones, Night's
+Whisper) into the "needs role review" band, which incorrectly implied they might be
+misclassified. FDS of 1.30 on a draw spell is just Card_Draw + Card_Advantage — the same
+concept, not a red flag. Raising to 1.5 filtered the false positives while still catching
+genuinely ambiguous cards (Mind Stone at FDS 1.95).
+
+**Duplicate tier2.append appeared in diff but not in code.**
+When reviewing Phase 7, the pasted diff appeared to show a duplicate `tier2.append()` call.
+The actual file had only one. Lesson: always verify suspected bugs by reading the actual
+source rather than the pasted diff — display artifacts in conversation can look like bugs.
+
+### Useful Commands
+
+```bash
+# Run full analysis and generate all 13 reports:
+python scripts/deck_gap_analysis.py
+
+# Run interactive preference review:
+python scripts/interactive_cut_review.py
+
+# Run focused regression tests:
+pytest tests/test_phase6_patterns.py tests/test_cut_verdicts.py
+
+# Run full test suite:
+pytest tests/
+```
+
+### Architecture Going Forward
+
+The system has four clean layers:
+1. **Tag engine** (`src/mtgdeck/tags.py`) — oracle text → mechanical/functional tags
+2. **Analysis pipeline** (`scripts/deck_gap_analysis.py`) — tags → weighted roles → cut model
+3. **Preference layer** — cut model + player weights → ranked cut review
+4. **CLI** (`scripts/interactive_cut_review.py`) — player input → preference layer
+
+Each layer is independently testable. Keep them that way. The next meaningful expansion
+is Phase 10: recording actual cut decisions and building toward a proposed 100-card list.
+
+---
+
 ## 2026-05-23
 
 ### What We Built

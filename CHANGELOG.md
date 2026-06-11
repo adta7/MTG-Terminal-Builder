@@ -5,6 +5,98 @@ Format: [Version] — Date — Description
 
 ---
 
+## [3.0.0] — 2026-06-10
+
+Major milestone: the deckbuilding companion backend evolved from a tagging system into a
+decision-support system with structural validation, weighted role analysis, archetype-aware
+cut planning, preference-weighted cut review, and a regression test suite.
+
+### Added
+
+**Deck analysis pipeline (`scripts/deck_gap_analysis.py`):**
+- Phase 6B — Structural validator: detects incomplete decks, labels role counts as diagnostic
+  only when deck < 100 cards or < 30 lands; writes `structural_summary.json` with
+  `deck_readiness` / `role_counts_are_final` fields
+- Phase 6B — Pattern blind-spot tracking: `KNOWN_BLIND_SPOTS` dict + `pattern_blindspots.csv`
+  output; 0-role cards flagged as parser gaps rather than cut candidates
+- Phase 6B — 4 oracle text pattern fixes in `src/mtgdeck/tags.py`:
+  Tragic Slip → Removal, Dance of the Dead → Recursion,
+  Victimize → Recursion, Nyx Lotus → Mana_Acceleration
+- Phase 6C — Role weighting: each functional tag on each card now has a priority
+  (primary / secondary / incidental) and weight (1.0 / 0.65 / 0.35) derived from
+  rule-engine confidence; `weighted_role_summary.csv` output
+- Phase 6C — `MANUAL_ROLE_WEIGHTS` dict for cards where confidence-derived priority is wrong
+  (Archon of Cruelty, Ashnod's Altar, Black Market, Gray Merchant, Skullclamp)
+- Phase 6D — `WEIGHTED_TARGETS` — separate float target ranges for weighted role totals;
+  role counts table now shows raw count, primary count, weighted total, and W-status
+- Phase 6D — Deck completion planner: models cuts needed, lands to add, and cut pressure
+  tiers; writes `completion_plan.md`
+- Phase 6D — `functional_density_score()` — sum of role weights per card; labeled clearly
+  as density, not card power
+- Phase 6E — `PRIMARY_ROLE_OVERRIDES` — archetype-specific promotions for 13 cards
+  (Grave Pact, Pitiless Plunderer, Grave Titan, Butcher of Malakir, Ghoulish Procession,
+  Plaguecrafter, Accursed Marauder, Woe Strider, Ophiomancer, Jadar, Deadly Dispute,
+  Plumb the Forbidden, Disciple of Bolas, Syr Konrad)
+- Phase 6E — `PRIMARY_ROLE_VALIDATION` dict: 14 checks that run on every analysis;
+  fails loudly if any archetype-core card has no primary roles
+- Phase 6G — Syr Konrad fix: new functional rule
+  `Death_Trigger + Damage_Effect → Payoff` added to `src/mtgdeck/tags.py`
+- Phase 6F — Two-force cut model: `cut_pressure` (why to remove) vs `cut_cost` (what is
+  lost); `net_cut_score = cut_pressure - cut_cost`; `EARLY_CURVE_PROTECTION` and
+  `SCARCITY_PENALTY` constants; cards only appear in cut tiers when net > 0
+- Phase 6G — Cut verdict bands: `strong_cut_candidate` (net ≥ 1.0),
+  `borderline_cut_candidate` (0.25–1.0), `near_zero_review` (0–0.25),
+  `needs_role_review` (fds > 1.5 and 0 primary); `ROLE_REVIEW_FDS_THRESHOLD = 1.5`
+- Phase 7 — Deck completion simulation: `deck_completion_simulation.md` + `.json`;
+  4-phase cut path (confident → borderline → near-zero → human-required);
+  `model_confidence` field (high / medium / low) on every cut tier entry;
+  `complete_confident_path_available` computed dynamically
+- Phase 8 — Preference-weighted cut review: `PREFERENCE_PROFILE_NAME`,
+  `DEFAULT_PREFERENCES` (7 pillars), `ROLE_PREFERENCE_MAP`; Tier 2 re-ranked by
+  `preference_adjusted_net = (pressure + curve_boost) - (base_cost + pref_cost)`;
+  writes `preference_cut_review.md` + `.json`
+- Phase 8A — Profile naming: `PREFERENCE_PROFILE_NAME = "sheoldred_recursive_sacrifice_midrange"`
+- `load_analysis_data(deck_path, db_path)` — shared data loader for both `run_analysis()`
+  and the interactive CLI; opens DB, tags cards, computes all analysis structures,
+  closes DB, returns everything in-memory
+
+**Interactive CLI (`scripts/interactive_cut_review.py`):**
+- Phase 9 — Prompts user for 7 preference levels (low / medium / high / very_high);
+  converts to numeric weights; regenerates `preference_cut_review.md` and `.json`
+  without touching deck files; echoes changed preferences with `*` marker
+
+**Report files now generated (`reports/deck_analysis/`):**
+- `gap_report.md` — role counts, weighted targets, structural status, cut candidates
+- `role_counts.csv` — per-card mechanical and functional tags
+- `weighted_role_summary.csv` — per-card primary / secondary / incidental role breakdown
+- `weighted_role_targets.csv` — role-level weighted totals vs weighted target ranges
+- `primary_role_summary.csv` — role-level primary / secondary / incidental counts
+- `completion_plan.md` — structural cut path with verdict bands
+- `deck_completion_simulation.md` + `.json` — full simulation with model limit disclosure
+- `preference_cut_review.md` + `.json` — preference-adjusted Tier 2 cut ranking
+- `structural_summary.json` — machine-readable deck readiness status
+- `pattern_blindspots.csv` — cards the parser doesn't understand yet
+
+**Test suite (`tests/`):**
+- `test_phase6_patterns.py` — 16 regression tests for Phase 6B/6G oracle pattern fixes
+  (in-memory DB, synthetic Cards; no collection_scan.sqlite dependency)
+- `test_structural_status.py` — 15 pure-function tests for `compute_structural_status()`
+  across deck shapes (incomplete, complete, low-land)
+- `test_cut_verdicts.py` — 25 pure-function tests for `cut_verdict()` and
+  `model_confidence()` including boundary conditions and current-deck expected values
+- `test_report_outputs.py` — 28 integration tests: all 13 report files exist and are
+  non-empty; JSON files parse and have required keys; primary role validation passes
+- `test_interactive_cut_review.py` — 29 tests for `level_to_weight()` / `weight_to_label()`
+  including roundtrip invariants, case-insensitive input, and scale bounds
+
+### Changed
+- `src/mtgdeck/tags.py` — `_MECHANICAL_PATTERNS`: 4 new patterns added; 1 new functional
+  rule (`Death_Trigger + Damage_Effect → Payoff`) added to `FUNCTIONAL_RULES`
+- `scripts/deck_gap_analysis.py` — rewritten 4× across Phases 6B–9; 2 100-line →
+  ~2000-line evolution; all outputs backward-compatible
+
+---
+
 ## [2.8.0] — 2026-05-29
 
 ### Added

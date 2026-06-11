@@ -94,13 +94,13 @@ Logic: CMC 6+ and at least one over-represented role.
 
 | Card | CMC | Over-represented roles |
 |------|-----|------------------------|
-| Archon of Cruelty | 8 | Engine, Threat, Interaction, Removal, Card_Draw, Payoff |
-| Butcher of Malakir | 7 | Engine, Removal, Interaction, Threat |
-| Overseer of the Damned | 7 | Removal, Interaction |
+| Archon of Cruelty | 8 | Interaction, Payoff, Engine, Threat, Removal, Card_Draw |
+| Butcher of Malakir | 7 | Engine, Threat, Interaction, Removal |
+| Overseer of the Damned | 7 | Interaction, Removal |
 | Rune-Scarred Demon | 7 | Enabler |
-| Sheoldred, Whispering One | 7 | Engine, Threat, Enabler, Interaction, Recursion, Removal |
-| Grave Titan | 6 | Threat, Payoff, Fuel |
-| Nirkana Revenant | 6 | Mana_Acceleration, Mana_Engine |
+| Sheoldred, Whispering One | 7 | Interaction, Engine, Threat, Recursion, Removal, Enabler |
+| Grave Titan | 6 | Payoff, Threat, Fuel |
+| Nirkana Revenant | 6 | Mana_Engine, Mana_Acceleration |
 
 ### C. Parser Blind Spots
 
