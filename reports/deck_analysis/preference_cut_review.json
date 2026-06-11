@@ -1,0 +1,117 @@
+{
+  "preference_profile_name": "sheoldred_recursive_sacrifice_midrange",
+  "preferences": {
+    "preserve_big_mythic_threats": 0.8,
+    "preserve_sacrifice_control": 1.5,
+    "preserve_draw_consistency": 1.0,
+    "preserve_mana_explosion": 0.8,
+    "preserve_token_fuel_density": 1.2,
+    "preserve_recursion_density": 1.5,
+    "lower_curve_aggressively": 0.5
+  },
+  "cuts_still_needed": 10,
+  "tier2_ranked": [
+    {
+      "name": "Archon of Cruelty",
+      "cmc": 8,
+      "base_net": 7.2,
+      "preference_adjusted_net": 8.4,
+      "primary_roles": [
+        "Threat"
+      ],
+      "preference_categories_hit": [
+        "preserve_big_mythic_threats"
+      ],
+      "model_confidence": "medium"
+    },
+    {
+      "name": "Rune-Scarred Demon",
+      "cmc": 7,
+      "base_net": 4.3,
+      "preference_adjusted_net": 3.8,
+      "primary_roles": [
+        "Card_Advantage",
+        "Setup"
+      ],
+      "preference_categories_hit": [
+        "preserve_draw_consistency"
+      ],
+      "model_confidence": "medium"
+    },
+    {
+      "name": "Overseer of the Damned",
+      "cmc": 7,
+      "base_net": 4.0,
+      "preference_adjusted_net": 2.5,
+      "primary_roles": [
+        "Interaction",
+        "Removal"
+      ],
+      "preference_categories_hit": [
+        "preserve_sacrifice_control"
+      ],
+      "model_confidence": "medium"
+    },
+    {
+      "name": "Nirkana Revenant",
+      "cmc": 6,
+      "base_net": 2.3,
+      "preference_adjusted_net": 1.7,
+      "primary_roles": [
+        "Mana_Acceleration",
+        "Mana_Engine"
+      ],
+      "preference_categories_hit": [
+        "preserve_mana_explosion"
+      ],
+      "model_confidence": "low"
+    },
+    {
+      "name": "Grave Titan",
+      "cmc": 6,
+      "base_net": 2.3,
+      "preference_adjusted_net": 1.3,
+      "primary_roles": [
+        "Fuel",
+        "Threat"
+      ],
+      "preference_categories_hit": [
+        "preserve_big_mythic_threats",
+        "preserve_token_fuel_density"
+      ],
+      "model_confidence": "low"
+    },
+    {
+      "name": "Butcher of Malakir",
+      "cmc": 7,
+      "base_net": 4.0,
+      "preference_adjusted_net": 0.2,
+      "primary_roles": [
+        "Engine",
+        "Interaction",
+        "Removal",
+        "Threat"
+      ],
+      "preference_categories_hit": [
+        "preserve_sacrifice_control",
+        "preserve_big_mythic_threats"
+      ],
+      "model_confidence": "medium"
+    },
+    {
+      "name": "Gray Merchant of Asphodel",
+      "cmc": 5,
+      "base_net": 0.3,
+      "preference_adjusted_net": -1.2,
+      "primary_roles": [
+        "Finisher",
+        "Payoff"
+      ],
+      "preference_categories_hit": [
+        "preserve_big_mythic_threats",
+        "preserve_token_fuel_density"
+      ],
+      "model_confidence": "low"
+    }
+  ]
+}

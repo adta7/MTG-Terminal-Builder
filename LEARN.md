@@ -4,6 +4,100 @@ Personal lessons, discoveries, and notes from building this project.
 
 ---
 
+## 2026-06-10 — Phases 6B–9: Deckbuilding Decision Support
+
+### What We Built
+
+Evolved the backend from a card tagging system into a full deckbuilding decision-support
+system. The pipeline now produces 13 report files, has a preference-weighted interactive
+CLI, and has 560 regression tests.
+
+### Architecture Notes
+
+**Confidence vs importance are different things.**
+The functional rule engine assigns confidence values (0.65–0.95) that mean "how certain
+are we that this role applies?" This is NOT the same as "how central is this role to why
+you play the card?" Archon of Cruelty has Card_Draw at 0.85 confidence (correct — it does
+draw cards) but Threat should be its primary role. The primary-role system (Phase 6C–6E)
+separates these two questions. Keep them separate going forward.
+
+**Build two opposing forces, not one score.**
+The cut planner (Phase 6F) works because it has two forces: `cut_pressure` (why to remove)
+and `cut_cost` (what the deck loses). A single ranking collapses this into noise. Any
+recommendation system should model the tradeoff explicitly, not try to reduce it to one
+number.
+
+**Name your profile, not your defaults.**
+`DEFAULT_PREFERENCES` with no name is dangerous — future analysis on a different deck will
+inherit these weights silently. Naming it `sheoldred_recursive_sacrifice_midrange` makes it
+clear these weights are identity-specific, not universal. When you build a Gisa deck or a
+Braids deck, create a new named profile dict.
+
+**0-role cards are not bad cards. They are parser gaps.**
+Phase 6B discovered this: Tragic Slip, Dance of the Dead, Victimize all had 0 functional
+roles — not because they were bad, but because the oracle text patterns didn't cover their
+specific phrasings. The `KNOWN_BLIND_SPOTS` pattern is reusable: before marking a 0-role
+card as a cut, always ask "does the parser understand what this card does?"
+
+**Test before adding UI.**
+Phase T1 was done immediately before building the interactive CLI (Phase 9). This was the
+right call. With 560 tests in place, any future change to the tag engine, structural math,
+or cut model will fail fast. Without those tests, a UI bug and a logic bug look identical.
+
+**The backend should say where its confidence ends.**
+`deck_completion_simulation.json` has `complete_confident_path_available: false` and
+`warning: "This model cannot complete the final deck..."`. This is the right design for any
+AI-adjacent tool — state your limits explicitly rather than paper over them with output.
+
+### Mistakes / Fixes
+
+**Primary threshold too strict (Phase 6E regression).**
+Setting `PRIMARY_THRESHOLD = 0.88` was correct for Archon but caused all aristocrats-specific
+cards (Grave Pact, Pitiless Plunderer, Grave Titan) to have 0 primary roles. Fix: add
+`PRIMARY_ROLE_OVERRIDES` for archetype-specific promotions. The threshold stays at 0.88 for
+auto-classification; the override layer handles archetype knowledge.
+
+**`needs_role_review` threshold too low (Phase 6G).**
+Setting `ROLE_REVIEW_FDS_THRESHOLD = 1.0` put pure draw spells (Read the Bones, Night's
+Whisper) into the "needs role review" band, which incorrectly implied they might be
+misclassified. FDS of 1.30 on a draw spell is just Card_Draw + Card_Advantage — the same
+concept, not a red flag. Raising to 1.5 filtered the false positives while still catching
+genuinely ambiguous cards (Mind Stone at FDS 1.95).
+
+**Duplicate tier2.append appeared in diff but not in code.**
+When reviewing Phase 7, the pasted diff appeared to show a duplicate `tier2.append()` call.
+The actual file had only one. Lesson: always verify suspected bugs by reading the actual
+source rather than the pasted diff — display artifacts in conversation can look like bugs.
+
+### Useful Commands
+
+```bash
+# Run full analysis and generate all 13 reports:
+python scripts/deck_gap_analysis.py
+
+# Run interactive preference review:
+python scripts/interactive_cut_review.py
+
+# Run focused regression tests:
+pytest tests/test_phase6_patterns.py tests/test_cut_verdicts.py
+
+# Run full test suite:
+pytest tests/
+```
+
+### Architecture Going Forward
+
+The system has four clean layers:
+1. **Tag engine** (`src/mtgdeck/tags.py`) — oracle text → mechanical/functional tags
+2. **Analysis pipeline** (`scripts/deck_gap_analysis.py`) — tags → weighted roles → cut model
+3. **Preference layer** — cut model + player weights → ranked cut review
+4. **CLI** (`scripts/interactive_cut_review.py`) — player input → preference layer
+
+Each layer is independently testable. Keep them that way. The next meaningful expansion
+is Phase 10: recording actual cut decisions and building toward a proposed 100-card list.
+
+---
+
 ## 2026-05-23
 
 ### What We Built
@@ -648,3 +742,395 @@ Added detailed logging to `/tmp/getch.log` showing each byte read and each `sele
   2. Complete arrow key sequences (all three bytes arrive within 50ms windows)
 
 ---
+
+## 2026-05-26
+
+### Phase 0: Modular Architecture Complete
+
+Built a modular architecture by extracting business logic into separate modules (models, database, parser, rules, scryfall).
+
+**Why this matters:** Single 1689-line mtg.py is hard to extend. Separate modules let us add features (phases 1-5) without touching existing code.
+
+**What was built:**
+- `src/mtgdeck/` — 7 core modules with typed dataclasses
+- SQLite persistence layer (replaces lazy-loaded 165MB JSON)
+- Parser moved from mtg.py (no logic changes)
+- Rules engine for Commander validation
+- 5 tests, all passing
+
+**Backward compatibility:** mtg.py still works unchanged. Users don't see a difference except the app is faster.
+
+### Scryfall Download Issue
+
+Attempted automatic download from Scryfall but the URL failed (404).
+
+**Problem:** The direct URL `https://data.scryfall.io/oracle-cards/oracle-cards.json` returns 404.
+
+**Current solution:** Manual download from https://scryfall.com/docs/api/bulk-data (select "Default Cards" JSON).
+
+**Must-fix:** Implement automatic download before Phase 1. This is a UX requirement — users should not need manual steps.
+
+**Why it matters:** `pip install -e .` was also a missing step. The more manual steps, the worse the experience. Setup should be: run one command, wait 1-2 minutes, done.
+
+### Design Pattern: Parallel Architecture
+
+Instead of refactoring mtg.py (risky, breaks things), we built a parallel structure:
+- Keep mtg.py as-is
+- Build new modules in src/mtgdeck/
+- New features extend the modules, not mtg.py
+- Phases 1-5 gradually deprecate mtg.py (no rush)
+
+This is like building scaffolding around a building while it's operating. Safe, reversible, allows gradual migration.
+
+### Dataclasses Over Dicts
+
+Using `@dataclass` instead of dicts:
+```python
+# Old way (error-prone)
+card = {"name": "...", "cmc": 3}
+if card.get("cmc"):  # Typo? Dict doesn't complain
+
+# New way (type-safe)
+card = Card(name="...", cmc=3)
+card.cmc  # IDE knows this exists, catches typos
+```
+
+Dataclasses enable IDE autocomplete, type checking, and catch bugs early.
+
+### Python Package Installation
+
+`pip install -e .` (editable mode) with pyproject.toml is the modern Python way:
+- Tells pip where your package is
+- Creates symlink to source (changes reflect immediately)
+- `python -m mtgdeck` works because Python knows where to find mtgdeck
+- Also enables `python -m pytest` without cd'ing
+
+Should have done this from the start.
+
+### Worktree Setup: File Location Matters
+
+When working in a git worktree (`.claude/worktrees/`), paths are relative to the worktree root, NOT the parent repo.
+
+**Problem:** Scryfall JSON was in `/repo/oracle-cards-*.json` but the worktree was at `/repo/.claude/worktrees/abc123/`.
+The `find_scryfall_json()` function looked in the worktree directory and didn't find it.
+
+**Solution:** Copy the file into the worktree:
+```bash
+cp oracle-cards-*.json .claude/worktrees/abc123/
+```
+
+**Why it matters:** When you `cd` into a worktree, `./data/` means the worktree's data dir, not the parent repo's. `Path(".").glob()` searches the current working directory. Being off by one level breaks file discovery.
+
+**Lesson:** When using worktrees, either:
+1. Copy shared files (like Scryfall JSON) into the worktree
+2. Update find functions to search `../../` if needed
+3. Use symlinks from parent to worktree
+
+---
+
+## 2026-05-26 (continued) — Stage 1: Mechanical Pattern Engine
+
+### What We Built
+
+Expanded the mechanical auto-tagger from 26 to 35 tags with 113 tests. Every tag now has:
+- At least one positive match test (should fire)
+- At least one negative match test (should NOT fire)
+
+**Final coverage:** 166 tag-card pairs across 76 deck cards.
+
+---
+
+### Regex Design for Oracle Text Matching
+
+**Start precise, then soften.** Begin with the exact known phrase, then generalize only when you discover a miss. Too-broad patterns cause false positives that corrupt downstream layers.
+
+Example — Targeted Removal started as:
+```python
+r"destroy target creature"        # misses "destroy target nonblack creature"
+```
+Became:
+```python
+r"destroy target (?:\w+ )?(?:creature|permanent|artifact|enchantment|planeswalker)"
+```
+The `(?:\w+ )?` allows one optional qualifier word (nonblack, tapped, nonartifact) without breaking the specificity.
+
+**Use `\b` for keyword matching.** Checking `r"\bflying\b"` is safe in MTG oracle text because "flying" only ever appears as a keyword. Without `\b`, "flyingcolors" would match.
+
+**Use `(?:…)?` for optional clauses.** Living Death says "puts all cards they exiled" with `all cards` directly adjacent. The original pattern had `.{1,40}` (requiring ≥1 chars) and missed it. Changed to `.{0,40}` (zero or more).
+
+**Oracle text modernization matters.** Scryfall standardized self-recursion in post-2022 oracle updates:
+- Old: `"Return Reassembling Skeleton from your graveyard to the battlefield tapped"`
+- New: `"Return this card from your graveyard to the battlefield tapped"`
+
+Pattern `r"return this card from your graveyard"` now catches every self-recursive card cleanly without naming each one.
+
+---
+
+### Confidence Values Are Not Decoration
+
+Every pattern has a confidence value (0.0–1.0). Use it deliberately:
+
+| Confidence | When to use |
+|---|---|
+| 1.0 | Mechanically certain — oracle text is explicit and unambiguous |
+| 0.9–0.95 | Strong signal — matches the exact mechanism but may have edge cases |
+| 0.85 | Good match — common phrasing, very few false positives expected |
+| 0.8 | Reasonable — broader pattern, some interpretive overlap |
+
+Lower confidence isn't "bad" — it's honest about what you know. The rule engine uses confidence to weight its inferences.
+
+---
+
+### Layered Tagging Architecture
+
+The five-layer ontology works because each layer answers a different question:
+
+| Layer | Question | Example |
+|---|---|---|
+| Mechanical | What does the card literally do? | `Death_Trigger` |
+| Functional | What role does it play in a deck? | `Payoff` |
+| Archetype | What strategy wants it? | `Aristocrats` |
+| Emotional | What is its strategic identity? | `Engine_Core` |
+
+**Never conflate layers.** `Sacrifice_Outlet` (mechanical) and `Engine` (functional) are different things. A card can be a Sacrifice_Outlet without being an Engine — if it sacs but provides no ongoing value, it's just a Sacrifice_Outlet.
+
+**Mechanical is objective. Functional is contextual.** A card can be a Sacrifice_Outlet in one deck and pure Fuel in another. Mechanical tags are always true; functional tags depend on the deck.
+
+---
+
+### Side-by-Side Terminal Layout with ANSI
+
+Rich's markup system doesn't support mixing with raw `print()` easily. When you need to build a side-by-side layout (card frame + tag column), extract each side as a `list[str]` and zip them:
+
+```python
+card_lines = _build_card_lines(card)    # list of raw strings, fixed width
+tag_lines  = _build_tag_right_lines(card_name)  # list of ANSI-colored strings
+
+GAP = "   "
+card_w = len(card_lines[0]) if card_lines else 0
+max_rows = max(len(card_lines), len(tag_lines))
+
+for i in range(max_rows):
+    left  = card_lines[i] if i < len(card_lines) else " " * card_w
+    right = tag_lines[i]  if i < len(tag_lines)  else ""
+    print(left + GAP + right)
+```
+
+Use `\033[36m` style ANSI codes directly in the tag column strings — Rich's console.print would interfere with the fixed-width alignment.
+
+**ANSI color constants:**
+- `\033[36m` — cyan (mechanical)
+- `\033[32m` — green (functional)
+- `\033[33m` — yellow (archetype)
+- `\033[35m` — magenta (emotional)
+- `\033[2m` — dim
+- `\033[0m` — reset (always needed at end of colored string)
+
+---
+
+### Test Design for Pattern Matching
+
+Pattern tests should be isolated from the database. Each test class:
+1. Creates a minimal Card object with crafted oracle text
+2. Calls `tag_mechanical(card, db)` against an in-memory DB
+3. Asserts the tag is (or is not) in the result list
+
+```python
+def _make_card(name, oracle_text=""):
+    return Card(name=name, mana_cost="", cmc=0, type_line="Creature",
+                oracle_text=oracle_text)
+
+def test_swampwalk_evasion(db):
+    card = _make_card("Sheoldred", "Swampwalk\nWhen this enters...")
+    assert "Evasion" in tags.tag_mechanical(card, db)
+```
+
+**Always include the negative test.** If you only test "does it fire", you won't catch patterns that are too broad and fire on everything. The negative test is where you catch false positives.
+
+---
+
+### Small Advice
+
+- When you add a new regex pattern, immediately test it against 3 cards: one that should match, one that shouldn't, and one edge case.
+- `re.search(pattern, oracle.lower())` — always lowercase the oracle text. Scryfall uses mixed case but patterns are case-insensitive.
+- "Looting" (draw-then-discard) is different from "discard as a cost then draw." Check for `then discard` vs `discard [cost] ... draw`. These have very different strategic implications.
+- Adding a tag only costs a few lines. The cost of a missing tag is silent incorrect analysis downstream. When in doubt, add it.
+
+---
+
+## 2026-05-26 (continued) — Stage 2: Functional Rule Engine
+
+### What We Built
+
+A rule-based inference engine that derives Layer 3 (Functional) tags from Layer 2 (Mechanical) tags. 239 functional tags across 75 deck cards, all derived automatically. 0 manual assignments needed.
+
+**Key numbers:**
+- 80+ inference rules in `FUNCTIONAL_RULES`
+- 16 functional tags populated: Enabler (36 cards), Engine (27), Mana_Acceleration (22), Payoff (20), Threat (20), Conversion (20), Recursion (17), Card_Advantage (17), Fuel (16), Removal (14), Interaction (13), Mana_Engine (9), Setup (7), Finisher_Support (7), Protection (5), Finisher (5)
+
+---
+
+### How the Rule Engine Works
+
+The functional rule engine is a set-intersection algorithm:
+
+```python
+for required, functional_tag, confidence in FUNCTIONAL_RULES:
+    if required.issubset(mech_tags):
+        best_confidence[functional_tag] = max(confidence, best_confidence.get(functional_tag, 0.0))
+```
+
+**Three design decisions that matter:**
+
+1. **frozenset as the key, not a list.** Rules must be declarative. A frozenset makes it clear the required tags are unordered — it doesn't matter if the card has `Death_Trigger` before or after `Life_Drain`.
+
+2. **Best-confidence wins, not first-match.** Multiple rules can fire for the same functional tag. `Blood Artist` gets Payoff at 0.90 (Death_Trigger + Life_Drain) and also qualifies for Payoff at 0.85 via another path. The engine stores only 0.90 — the most confident signal wins.
+
+3. **source="rule_engine" on all derived tags.** This distinguishes auto-derived functional tags from manually assigned ones. Later, if you disagree with a derivation, you can override it with source="manual" and the logic that favors higher confidence (manual = 1.0) will respect your judgment.
+
+---
+
+### Reminder Text Is a Double-Edged Sword
+
+Cards like Pitiless Plunderer include Treasure token reminder text:
+> "create a Treasure token. (It's an artifact with 'Sacrifice this artifact: Add one mana of any color.')"
+
+The pattern `r"sacrifice .{1,20}: add"` fires on the reminder text and tags Pitiless Plunderer with `Sacrifice_Outlet` and `Mana_Production`. This is technically a false positive — Pitiless Plunderer itself doesn't have a sac outlet. But the net effect is real: the card creates tokens that are sac outlets, so tagging it `Engine` (via Sacrifice_Outlet + Mana_Production) isn't wrong from a deck-strategy perspective.
+
+**Decision:** Accept this as an acceptable approximation at current confidence levels. If precision matters later, strip reminder text from oracle text before pattern matching.
+
+---
+
+### Rule Design: Single Tags vs. Compound Rules
+
+**Single-tag rules** are broad and low confidence:
+```python
+(frozenset({"Sacrifice_Outlet"}), "Enabler", 0.80)
+```
+Fires for anything that can sacrifice — most of the time correct.
+
+**Compound rules** are specific and high confidence:
+```python
+(frozenset({"Sacrifice_Outlet", "Mana_Production"}), "Engine", 0.90)
+```
+Only fires when both are present — reliable signal.
+
+**Guideline:** Start with compound rules for high-confidence tags (Finisher, Engine). Use single-tag rules only when the single tag is itself highly specific (Tutor_Effect alone → Setup is safe because tutors almost always set up).
+
+---
+
+### Layer 2 Pattern Gaps Found (and Fixed)
+
+During the functional rule design, several mechanical pattern gaps surfaced from specific cards:
+
+| Card | Missing Tag | Root Cause | Fix |
+|---|---|---|---|
+| Braids | Forced_Sacrifice | "may sacrifice" vs "sacrifices" | Added `(?:may )?sacrifice(?:s)?` |
+| Braids | Upkeep_Trigger | "each other player's upkeep" not in alternation | Added to alternation |
+| Braids | Discard_Effect | "that player discards" not covered | Added pattern |
+| Archon of Cruelty | Life_Drain | "and loses 3 life" compound clause | Added `r"and loses? \d+ life"` |
+| Crypt Ghast | Life_Gain | Extort says "gain that much life" | Added `r"you gain that much life"` |
+| Pitiless Plunderer | Token_Generation | Treasure is an artifact token, not creature | Added artifact token pattern |
+| Jadar | Upkeep_Trigger | "end step" not in Upkeep_Trigger timing | Added to alternation |
+| Exsanguinate | (nothing) | No way to distinguish X-spell from fixed drain | Added X_Spell_Effect tag |
+
+**Lesson:** Build functional rules before you think your mechanical layer is complete. The functional rules reveal which mechanical distinctions actually matter.
+
+---
+
+### Verifying the Rule Engine Against Real Cards
+
+After writing rules, spot-check 5–10 cards manually. The test is: does the functional derivation match how you'd actually describe the card to a fellow deckbuilder?
+
+- **Blood Artist** → `Payoff(0.90)` — correct, it's the classic aristocrats payoff
+- **Ashnod's Altar** → `Engine + Conversion` — correct, it converts creatures into mana
+- **Exsanguinate** → `Finisher(0.90)` — correct, this is the win condition
+- **Living Death** → `Recursion + Finisher` — correct, it resets the board in your favor
+- **Reassembling Skeleton** → `Fuel + Recursion` — correct, it's the repeating sacrifice body
+
+If the derivation disagrees with your intuition, either fix the rule or override with a manual tag. The engine is a starting point, not the final word.
+
+---
+
+### Small Advice
+
+- `frozenset({"A", "B"})` not `{"A", "B"}` — frozensets are hashable and can serve as dict keys if you ever need to deduplicate rules.
+- The rule engine is O(n × m) where n = cards, m = rules. With 75 cards and 80 rules this is trivially fast. At 36k cards it's still < 0.1s.
+- Run the mechanical tagger again any time you add new patterns — the database stores tags with UPSERT, so re-running is always safe and always picks up new patterns.
+
+---
+
+## 2026-05-26 (continued) — Stage 3: Archetype Rule Engine + INSERT Safety Fix
+
+### What We Built
+
+Layer 4 archetype derivation: 50+ rules mapping mechanical tag combinations to archetype tags. 111 new archetype tag-card pairs applied without touching any of the 155 existing manual tags.
+
+Key archetypes populated by rules: Aristocrats (48 total), Sacrifice (34), Graveyard (26), Reanimator (25), Control (16), Tokens (11), Big_Mana (9), Lifegain (4), Devotion (4), Voltron (3), Stax (2), Discard (1).
+
+---
+
+### Critical Bug: INSERT OR REPLACE Destroys Manual Tags
+
+**Problem discovered during design:** The existing `tag_card()` used `INSERT OR REPLACE INTO card_tags`. In SQLite, `INSERT OR REPLACE` is equivalent to `DELETE + INSERT`. This means:
+
+- Manual tag: Blood Artist, Aristocrats, confidence=1.0, source=manual
+- Rule engine fires: Blood Artist, Aristocrats, confidence=0.85, source=rule_engine
+- `INSERT OR REPLACE` deletes the manual row and inserts the rule_engine row
+- Result: manual 1.0 silently downgraded to 0.85
+
+This would have corrupted all 155 manual archetype tags.
+
+**Fix:** `tag_card_if_higher()` — a new database method that uses `INSERT ... ON CONFLICT ... DO UPDATE SET` with a CASE expression:
+
+```sql
+INSERT INTO card_tags (card_id, tag_id, confidence, source, note)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(card_id, tag_id) DO UPDATE SET
+    confidence = CASE
+        WHEN excluded.confidence > card_tags.confidence
+        THEN excluded.confidence ELSE card_tags.confidence END,
+    source = CASE
+        WHEN excluded.confidence > card_tags.confidence
+        THEN excluded.source ELSE card_tags.source END
+```
+
+This is available in SQLite 3.24+ (2018) — safe for Python 3.8+.
+
+**Rule:** `tag_card()` is for deliberate writes (regex tagging, manual assignment). `tag_card_if_higher()` is for all rule-engine derivations. Never use `tag_card()` in an automated pipeline that runs after human tagging.
+
+---
+
+### Archetype Layer vs. Functional Layer: Different Design Choices
+
+**Functional rules** could take mechanical OR functional tags as input — either worked.
+**Archetype rules** should take **mechanical tags only**.
+
+Why: Functional tags (`Payoff`, `Engine`) are too generic for archetype inference. `Payoff` alone doesn't tell you whether the card belongs in Aristocrats, Big_Mana, or Devotion. Mechanical tags (`Death_Trigger + Life_Drain`) encode the specific strategic signal precisely.
+
+The general principle: each rule layer should receive the most specific, reliable input available. Abstractions are useful for humans but lose the fine-grained signals that rule engines need.
+
+---
+
+### Archetype Coverage Is Not 100% by Design
+
+Generic staples (Sol Ring, Arcane Signet, Demonic Tutor) fit every strategy and belong to none specifically. **They intentionally get zero archetype tags from rules.** Their existing manual archetype tags (assigned by a human in the context of "this card is in my aristocrats deck") are preserved.
+
+This is the right design. A tag that says "this card specifically serves this strategy" is only useful when it's discriminating. If every black card is tagged Aristocrats, the tag means nothing.
+
+---
+
+### Stax and Voltron are Edge Cases
+
+- **Stax** (2 cards): Braids and Sheoldred both have `Forced_Sacrifice + Upkeep_Trigger`. Both force opponent choices every upkeep — that IS stax, even if the deck doesn't lean into it intentionally.
+- **Voltron** (3 cards): Lashwrithe (scales with lands, for equipping a commander), Swiftfoot Boots (commander protection), Yahenni (grows indefinitely, has indestructible). All are correct at their confidence levels.
+
+Don't be afraid of small numbers. 2 Stax cards means "your deck has a stax element." That's accurate.
+
+---
+
+### Small Advice
+
+- Check for `INSERT OR REPLACE` in any database layer where data provenance matters. "Last write wins" is a footgun when multiple systems write to the same row.
+- Before implementing a new derivation layer, audit what already exists in the database. You might have ground truth (manual tags) that the automated layer must not overwrite.
+- When a rule fires on a "wrong" card (Protection_Effect → Voltron for Yahenni), check the confidence. 0.55 says "plausible but not confident." That's the right answer — Yahenni CAN be Voltron but isn't primarily.

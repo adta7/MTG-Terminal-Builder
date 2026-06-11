@@ -1,0 +1,223 @@
+# Golden Test Set: Expected Mechanical Tags
+#
+# This YAML file defines the source of truth for mechanical tag expectations.
+# Every card listed here has been manually verified to have the correct tags.
+#
+# Format:
+#   card_name:
+#     must_have:
+#       - Tag1
+#       - Tag2
+#     must_not_have:
+#       - WrongTag1
+#       - WrongTag2
+#
+# Both must_have and must_not_have are important:
+# - must_have ensures we don't miss tags
+# - must_not_have catches false positives and semantic errors
+#
+# Organized by mechanic family for easier review.
+
+---
+
+# ─── Sacrifice Outlets & Mana ────────────────────────────────────────────────
+
+Ashnod's Altar:
+  must_have:
+    - Sacrifice_Outlet
+    - Mana_Production
+  must_not_have:
+    - Death_Trigger
+    - Token_Generation
+    - Reanimation
+
+Viscera Seer:
+  must_have:
+    - Sacrifice_Outlet
+  must_not_have:
+    - Mana_Production
+    - Token_Generation
+
+# ─── Death Triggers & Aristocrats ────────────────────────────────────────────
+
+Blood Artist:
+  must_have:
+    - Death_Trigger
+    - Life_Drain
+  must_not_have:
+    - Sacrifice_Outlet
+    - Token_Generation
+
+Zulaport Cutthroat:
+  must_have:
+    - Death_Trigger
+    - Life_Drain
+  must_not_have:
+    - Sacrifice_Outlet
+
+Grave Pact:
+  must_have:
+    - Death_Trigger
+    - Forced_Sacrifice
+  must_not_have:
+    - Sacrifice_Outlet
+    - Life_Drain
+
+# ─── Reanimation & Recursion ─────────────────────────────────────────────────
+
+Animate Dead:
+  must_have:
+    - Reanimation
+    - Return_Self_From_Graveyard
+  must_not_have:
+    - Token_Generation
+    - Life_Gain
+    - Mana_Production
+
+Living Death:
+  must_have:
+    - Mass_Recursion
+    - Reanimation
+  must_not_have:
+    - Single_Target
+    - Token_Generation
+
+Bloodghast:
+  must_have:
+    - Return_Self_From_Graveyard
+    - Landfall
+  must_not_have:
+    - Reanimation
+    - Sacrifice_Outlet
+
+Reassembling Skeleton:
+  must_have:
+    - Return_Self_From_Graveyard
+  must_not_have:
+    - Reanimation
+    - Forced_Sacrifice
+    - Death_Trigger
+
+# ─── Token Generation & Payoffs ──────────────────────────────────────────────
+
+Ghoulcaller Gisa:
+  must_have:
+    - Token_Generation
+    - Sacrifice_Outlet
+  must_not_have:
+    - Reanimation
+    - Life_Drain
+
+Bitterblossom:
+  must_have:
+    - Token_Generation
+  must_not_have:
+    - Life_Gain
+    - Sacrifice_Outlet
+
+# ─── Mana & Ramp ────────────────────────────────────────────────────────────
+
+Sol Ring:
+  must_have:
+    - Mana_Production
+  must_not_have:
+    - Sacrifice_Outlet
+    - Ramp
+    - Card_Advantage
+
+Dark Ritual:
+  must_have:
+    - Mana_Production
+  must_not_have:
+    - Sacrifice_Outlet
+    - Life_Drain
+
+# ─── Draw & Card Advantage ───────────────────────────────────────────────────
+
+Phyrexian Arena:
+  must_have:
+    - Card_Advantage
+    - Life_Loss_Effect
+  must_not_have:
+    - Sacrifice_Outlet
+    - Token_Generation
+
+Necropotence:
+  must_have:
+    - Card_Advantage
+    - Life_Payment
+  must_not_have:
+    - Draw_Effect
+    - Discard_Effect
+
+# ─── Removal & Interaction ──────────────────────────────────────────────────
+
+Victim of Night:
+  must_have:
+    - Targeted_Removal
+    - Creature_Removal
+  must_not_have:
+    - Life_Drain
+    - Token_Generation
+
+Plague Crafter:
+  must_have:
+    - Targeted_Removal
+    - Creature_Removal
+  must_not_have:
+    - Sacrifice_Outlet
+    - Token_Generation
+
+# ─── Tutors & Search ────────────────────────────────────────────────────────
+
+Demonic Tutor:
+  must_have:
+    - Tutor_Effect
+  must_not_have:
+    - Card_Advantage
+    - Mana_Production
+
+Entomb:
+  must_have:
+    - Tutor_Effect
+    - Graveyard_Mill
+  must_not_have:
+    - Reanimation
+    - Card_Advantage
+
+# ─── Evasion & Keyword Abilities ────────────────────────────────────────────
+
+Guul Draz Vampire:
+  must_have:
+    - Evasion
+  must_not_have:
+    - Token_Generation
+    - Sacrifice_Outlet
+
+# ─── Complex/Combo Cards ────────────────────────────────────────────────────
+
+Bolas's Citadel:
+  must_have:
+    - Mana_Production
+    - Life_Payment
+    - Card_Advantage
+  must_not_have:
+    - Sacrifice_Outlet
+    - Token_Generation
+
+Yawgmoth's Will:
+  must_have:
+    - Card_Advantage
+    - Recursion
+  must_not_have:
+    - Reanimation
+    - Sacrifice_Outlet
+
+Sheoldred, Whispering One:
+  must_have:
+    - Reanimation
+    - Upkeep_Trigger
+    - Tutor_Effect
+  must_not_have:
+    - Death_Trigger
+    - Token_Generation

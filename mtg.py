@@ -62,6 +62,11 @@ DOWNLOADS = os.path.expanduser("~/Downloads")
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DECKS_DIR = os.path.join(SCRIPT_DIR, "decks")
 
+# Make the mtgdeck package importable from this script's location.
+_SRC_DIR = os.path.join(SCRIPT_DIR, "src")
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
+
 DECKBUILDING_COLUMNS = [
     "Name", "Count", "Foil",
     "scryfall_name", "mana_cost", "cmc", "type_line", "oracle_text",
@@ -154,6 +159,67 @@ def get_scryfall_db():
         json_path = find_scryfall_json()
         _scryfall_db = load_scryfall_db(json_path)
     return _scryfall_db
+
+# ─── Tag DB (lazy load, Phase 2) ──────────────────────────────────────────────
+
+_tag_db = None
+
+
+def _get_tag_db():
+    """Lazily open the SQLite tag database. Returns None if unavailable."""
+    global _tag_db
+    if _tag_db is not None:
+        return _tag_db
+    try:
+        from mtgdeck.database import Database
+        db_path = os.path.join(SCRIPT_DIR, "data", "cards.sqlite")
+        if os.path.exists(db_path):
+            _tag_db = Database(db_path)
+            _tag_db.connect()
+    except Exception:
+        pass
+    return _tag_db
+
+
+_TAG_LAYER_COLORS = {
+    "mechanical": "cyan",
+    "functional": "green",
+    "archetype": "yellow",
+    "emotional": "magenta",
+}
+_TAG_LAYER_ORDER = ["mechanical", "functional", "archetype", "emotional"]
+
+
+def print_card_tags(card_name: str):
+    """Print Phase 2 role tags below a card if any have been tagged."""
+    tag_db = _get_tag_db()
+    if tag_db is None:
+        return
+
+    try:
+        all_tags = tag_db.get_card_tags(card_name)
+    except Exception:
+        return
+
+    if not all_tags:
+        return
+
+    # Group by layer
+    grouped: dict = {}
+    for tag in all_tags:
+        grouped.setdefault(tag["layer"], []).append(tag["name"])
+
+    WIDTH = min(term_width() - 2, 72)
+    console.print(f"  [dim]{'─' * (WIDTH - 2)}[/dim]")
+    for layer in _TAG_LAYER_ORDER:
+        names = grouped.get(layer)
+        if not names:
+            continue
+        color = _TAG_LAYER_COLORS[layer]
+        tags_str = "  ".join(f"[{color}]{n}[/{color}]" for n in names)
+        console.print(f"  [dim]{layer:<12}[/dim] {tags_str}")
+    console.print()
+
 
 # ─── Deck Manager ─────────────────────────────────────────────────────────────
 
@@ -1120,8 +1186,21 @@ def run_deck_manager():
 
 # ─── Card Lookup ──────────────────────────────────────────────────────────────
 
-def print_card(card):
-    WIDTH = min(term_width() - 2, 72)
+# ANSI codes for tag column colors (used in print(), not console.print()).
+_ANSI_TAG = {
+    "mechanical": "\033[36m",   # cyan
+    "functional": "\033[32m",   # green
+    "archetype":  "\033[33m",   # yellow
+    "emotional":  "\033[35m",   # magenta
+    "dim":        "\033[2m",
+    "reset":      "\033[0m",
+}
+
+
+def _build_card_lines(card) -> list[str]:
+    """Render a card as a list of plain-text lines. Does not print anything."""
+    # Narrowed from 72 to 57 to leave room for the tag column on the right.
+    WIDTH = min(term_width() - 2, 57)
     INNER = WIDTH - 2
     TEXT_W = INNER - 2
 
@@ -1146,11 +1225,11 @@ def print_card(card):
         type_line = " // ".join(f.get("type_line", "") for f in faces)
         oracle    = "\n\n".join(f.get("oracle_text", "") for f in faces)
 
-    power    = card.get("power")
+    power     = card.get("power")
     toughness = card.get("toughness")
-    loyalty  = card.get("loyalty")
-    rarity   = card.get("rarity", "").capitalize()
-    set_name = card.get("set_name", "")
+    loyalty   = card.get("loyalty")
+    rarity    = card.get("rarity", "").capitalize()
+    set_name  = card.get("set_name", "")
 
     lines = []
 
@@ -1158,12 +1237,21 @@ def print_card(card):
     lines.append(f"┌{'─' * INNER}┐")
 
     # Name (left) + mana cost (right)
-    mana_part = f"{mana} " if mana else " "
-    name_w    = INNER - len(mana_part) - 1
-    lines.append(row(f" {name[:name_w]:<{name_w}}{mana_part}"))
+    # DFC: render one row per face so long combined names don't overflow.
+    if "card_faces" in card:
+        for face in card["card_faces"]:
+            face_name = face.get("name", "")
+            face_mana = face.get("mana_cost", "")
+            face_mana_part = f"{face_mana} " if face_mana else " "
+            face_name_w = INNER - len(face_mana_part) - 1
+            lines.append(row(f" {face_name[:face_name_w]:<{face_name_w}}{face_mana_part}"))
+    else:
+        mana_part = f"{mana} " if mana else " "
+        name_w    = INNER - len(mana_part) - 1
+        lines.append(row(f" {name[:name_w]:<{name_w}}{mana_part}"))
 
     # Image box
-    img_inner = INNER - 4  # 54 chars inside the art border
+    img_inner = INNER - 4
     lines.append(mid_divider())
     lines.append(row(f" ┌{'─' * img_inner}┐ "))
     for _ in range(5):
@@ -1182,9 +1270,9 @@ def print_card(card):
             if para.strip():
                 for wrapped in textwrap.wrap(para, width=TEXT_W):
                     lines.append(text_row(wrapped))
-            else:
-                lines.append(text_row())
-    lines.append(text_row())
+                lines.append(text_row())  # blank line after each ability
+    else:
+        lines.append(text_row())  # padding when card has no oracle text
 
     # Bottom bar: rarity • set (left) and P/T or loyalty (right)
     lines.append(mid_divider())
@@ -1194,16 +1282,67 @@ def print_card(card):
         pt = f"[{loyalty}]"
     else:
         pt = ""
-    pt_part      = f"{pt} " if pt else " "
+    pt_part       = f"{pt} " if pt else " "
     bottom_left_w = INNER - len(pt_part) - 1
-    bottom_left  = f"{rarity} • {set_name}" if set_name else rarity
+    bottom_left   = f"{rarity} • {set_name}" if set_name else rarity
     lines.append(row(f" {bottom_left[:bottom_left_w]:<{bottom_left_w}}{pt_part}"))
 
     # Bottom border
     lines.append(f"└{'─' * INNER}┘")
+    return lines
+
+
+def _build_tag_right_lines(card_name: str) -> list[str]:
+    """
+    Build the tag side-column as plain strings with ANSI color codes.
+    Returns [] if the DB is unavailable or the card has no tags.
+    """
+    tag_db = _get_tag_db()
+    if tag_db is None:
+        return []
+
+    try:
+        all_tags = tag_db.get_card_tags(card_name)
+    except Exception:
+        return []
+
+    if not all_tags:
+        return []
+
+    grouped: dict = {}
+    for tag in all_tags:
+        grouped.setdefault(tag["layer"], []).append(tag["name"])
+
+    dim, reset = _ANSI_TAG["dim"], _ANSI_TAG["reset"]
+    lines = []
+    for layer in _TAG_LAYER_ORDER:
+        names = grouped.get(layer)
+        if not names:
+            continue
+        color = _ANSI_TAG[layer]
+        lines.append(f"{dim}{layer}{reset}")
+        lines.append(f"{dim}{'─' * 16}{reset}")
+        for name in names:
+            lines.append(f"{color}{name}{reset}")
+        lines.append("")   # blank line between layers
+
+    return lines
+
+
+def print_card(card):
+    """Print card frame with tags in a right-hand column."""
+    card_lines = _build_card_lines(card)
+    tag_lines  = _build_tag_right_lines(card.get("name", ""))
+
+    GAP      = "   "
+    card_w   = len(card_lines[0]) if card_lines else 0
+    max_rows = max(len(card_lines), len(tag_lines))
 
     print()
-    print("\n".join(lines))
+    for i in range(max_rows):
+        left  = card_lines[i] if i < len(card_lines) else " " * card_w
+        right = tag_lines[i]  if i < len(tag_lines)  else ""
+        print(left + GAP + right)
     print()
 
 def run_card_lookup():
@@ -1222,9 +1361,13 @@ def run_card_lookup():
 
         card = db.get(name.lower())
 
-        if card is None and "//" in name:
-            front = name.split("//")[0].strip()
-            card = db.get(front.lower())
+        if card is None:
+            # DFC fallback: "malakir rebirth" → "malakir rebirth // malakir mire"
+            # Works whether or not the user typed the "//" separator.
+            front = name.lower().split("//")[0].strip()
+            dfc_key = next((k for k in db if k.startswith(front + " //")), None)
+            if dfc_key:
+                card = db[dfc_key]
 
         if card is None:
             close = difflib.get_close_matches(name.lower(), list(db.keys()), n=3, cutoff=0.6)

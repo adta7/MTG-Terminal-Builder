@@ -1,0 +1,16 @@
+{
+  "deck_size": 87,
+  "deck_size_target": 100,
+  "land_count": 10,
+  "land_target_min": 36,
+  "land_target_max": 37,
+  "lands_needed": 26,
+  "nonland_count": 77,
+  "nonland_cuts_needed": 13,
+  "deck_readiness": "not_ready_for_final_evaluation",
+  "role_counts_are_final": false,
+  "reasons": [
+    "deck_below_100_cards",
+    "land_count_below_minimum"
+  ]
+}
